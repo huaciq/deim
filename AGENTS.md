@@ -39,8 +39,9 @@ The actual entry point is root `train.py`. Use `-t` for COCO initialization and
 `-r` for restoring a run; do not supply both. OGSOD baseline uses the checkpoint
 `/home/zxy/sar/pretrain/deim/deim_dfine_hgnetv2_s_coco_120e.pth`.
 With `remap_mscoco_category: False`, category IDs are training labels and must
-be zero-based. Run `tools/dataset/prepare_ogsod_baseline.py` to validate images
-and generate derived three-class annotations before this baseline.
+be zero-based. The baseline uses original COCO annotations with split prefixes
+in `file_name`, so `img_folder` is the `sar` root for both splits. The preparation
+script is optional; do not require it when original annotations already work.
 
 ## Required handoff after changes
 

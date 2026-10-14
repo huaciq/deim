@@ -1,14 +1,14 @@
 # DEIM-D-FINE-S / OGSOD-1.0 SAR-only baseline
 # Place: /home/zxy/sar/repos/deim/configs/deim_dfine/deim_hgnetv2_s_ogsod.yml
 # Based on DEIM official configs/deim_dfine/deim_hgnetv2_s_coco.yml
-# Run tools/dataset/prepare_ogsod_baseline.py before training.
+# Original COCO file_name entries include images/train or images/test prefixes.
 __include__: ['./deim_hgnetv2_s_coco.yml']
 
 output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_baseline/seed0
 use_ema: True
 use_amp: True
 
-# Native OGSOD IDs may be 1,2,3; preparation generates zero-based IDs 0,1,2.
+# With remapping disabled, annotations must use category IDs 0,1,2.
 num_classes: 3
 remap_mscoco_category: False
 
@@ -30,7 +30,7 @@ train_dataloader:
   total_batch_size: 32
   num_workers: 4
   dataset:
-    img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar/images/train
+    img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar
     ann_file: /data2/zxy/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/train.json
     transforms:
       policy:
@@ -43,5 +43,5 @@ val_dataloader:
   total_batch_size: 16
   num_workers: 4
   dataset:
-    img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar/images/test
+    img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar
     ann_file: /data2/zxy/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/val.json
