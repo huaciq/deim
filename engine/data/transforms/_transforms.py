@@ -113,6 +113,10 @@ class ConvertBoxes(T.Transform):
 
         return inpt
 
+    def transform(self, inpt: Any, params: Dict[str, Any]) -> Any:
+        # New torchvision v2 calls transform; older releases call _transform.
+        return self._transform(inpt, params)
+
 
 @register()
 class ConvertPILImage(T.Transform):
@@ -135,3 +139,7 @@ class ConvertPILImage(T.Transform):
         inpt = Image(inpt)
 
         return inpt
+
+    def transform(self, inpt: Any, params: Dict[str, Any]) -> Any:
+        # Keep both v2 hook names without changing conversion semantics.
+        return self._transform(inpt, params)
