@@ -1,0 +1,17 @@
+# OGSOD 120-epoch baseline. Keep the existing 80-epoch baseline unchanged.
+__include__: ['./deim_hgnetv2_s_ogsod.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_baseline_120e/seed0
+
+epoches: 120
+flat_epoch: 60
+no_aug_epoch: 8
+
+train_dataloader:
+  dataset:
+    transforms:
+      policy:
+        epoch: [4, 60, 112]
+  collate_fn:
+    mixup_epochs: [4, 60]
+    stop_epoch: 112
