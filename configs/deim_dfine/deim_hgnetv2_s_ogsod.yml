@@ -31,7 +31,7 @@ train_dataloader:
   num_workers: 4
   dataset:
     img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar/images/train
-    ann_file: /home/zxy/sar/experiments/deim_dfine_s_ogsod/prepared_data/train.json
+    ann_file: /data2/zxy/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/train.json
     transforms:
       policy:
         epoch: [4, 40, 72]
@@ -44,4 +44,4 @@ val_dataloader:
   num_workers: 4
   dataset:
     img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar/images/test
-    ann_file: /home/zxy/sar/experiments/deim_dfine_s_ogsod/prepared_data/val.json
+    ann_file: /data2/zxy/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/val.json
