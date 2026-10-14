@@ -11,6 +11,7 @@ import time
 import random
 import numpy as np
 import atexit
+import tempfile
 
 import torch
 import torch.nn as nn
@@ -118,9 +119,23 @@ def is_main_process():
     return get_rank() == 0
 
 
-def save_on_master(*args, **kwargs):
+def save_on_master(obj, path, **kwargs):
     if is_main_process():
-        torch.save(*args, **kwargs)
+        if not isinstance(path, (str, os.PathLike)):
+            torch.save(obj, path, **kwargs)
+            return
+        # Publish only a complete checkpoint; keep the previous one on failure.
+        path = os.fspath(path)
+        fd, temporary_path = tempfile.mkstemp(
+            prefix=os.path.basename(path) + '.', suffix='.tmp',
+            dir=os.path.dirname(os.path.abspath(path)))
+        try:
+            with os.fdopen(fd, 'wb') as checkpoint_file:
+                torch.save(obj, checkpoint_file, **kwargs)
+            os.replace(temporary_path, path)
+        finally:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
 
 
 

@@ -153,6 +153,10 @@ class BaseSolver(object):
 
     def load_resume_state(self, path: str):
         """Load resume"""
+        # All ranks must wait for rank 0 to finish saving the selected checkpoint.
+        # Atomic saving alone could otherwise let another rank read the old version.
+        if dist_utils.is_dist_available_and_initialized():
+            torch.distributed.barrier()
         if path.startswith('http'):
             state = torch.hub.load_state_dict_from_url(path, map_location='cpu')
         else:
