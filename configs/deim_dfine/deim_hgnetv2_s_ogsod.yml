@@ -1,0 +1,44 @@
+# DEIM-D-FINE-S / OGSOD-1.0 SAR-only baseline
+# Place: /home/zxy/sar/repos/DEIM/configs/deim_dfine/deim_hgnetv2_s_ogsod.yml
+# Based on DEIM official configs/deim_dfine/deim_hgnetv2_s_coco.yml
+# Run prepare_deim_ogsod.py once before training to build symlinks + COCO annotations.
+__include__: ['./deim_hgnetv2_s_coco.yml']
+
+output_dir: /data2/zxy/sar/experiments/deim_dfine_s_ogsod_baseline/seed0
+
+# Native OGSOD IDs may be 1,2,3; preparation generates zero-based IDs 0,1,2.
+num_classes: 3
+remap_mscoco_category: False
+
+# -t restores all compatible COCO detector weights. Classification heads adapt to 3 classes.
+HGNetv2:
+  pretrained: False
+
+# OGSOD adaptation plan, not the 132-epoch COCO reproduction.
+epoches: 80
+warmup_iter: 1000
+flat_epoch: 40
+no_aug_epoch: 8
+checkpoint_freq: 10
+print_freq: 50
+
+train_dataloader:
+  # GLOBAL batch: 32 across 2 GPUs = 16 per GPU (try 16 global if CUDA OOM).
+  total_batch_size: 32
+  num_workers: 4
+  dataset:
+    img_folder: /data2/zxy/sar/experiments/deim_dfine_s_ogsod/prepared_data/train
+    ann_file: /data2/zxy/sar/experiments/deim_dfine_s_ogsod/prepared_data/train.json
+    transforms:
+      policy:
+        epoch: [4, 40, 72]
+  collate_fn:
+    mixup_epochs: [4, 40]
+    stop_epoch: 72
+
+val_dataloader:
+  total_batch_size: 16
+  num_workers: 4
+  dataset:
+    img_folder: /data2/zxy/sar/experiments/deim_dfine_s_ogsod/prepared_data/val
+    ann_file: /data2/zxy/sar/experiments/deim_dfine_s_ogsod/prepared_data/val.json
