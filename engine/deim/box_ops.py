@@ -88,3 +88,64 @@ def masks_to_boxes(masks):
     y_min = y_mask.masked_fill(~(masks.bool()), 1e8).flatten(1).min(-1)[0]
 
     return torch.stack([x_min, y_min, x_max, y_max], 1)
+
+
+def wasserstein_distance_normalized(boxes1: Tensor, boxes2: Tensor, eps: float = 1e-7):
+    """
+    Normalized Wasserstein Distance (NWD) for oriented/small object detection.
+
+    NWD is scale-invariant and more suitable for small objects than IoU-based metrics.
+    Based on "A Normalized Gaussian Wasserstein Distance for Tiny Object Detection"
+    (https://arxiv.org/abs/2110.13389).
+
+    Args:
+        boxes1: [N, 4] in cxcywh format (normalized)
+        boxes2: [M, 4] in cxcywh format (normalized)
+        eps: small constant for numerical stability
+
+    Returns:
+        nwd: [N, M] matrix, values in [0, 1] where 1 means identical
+    """
+    N = boxes1.shape[0]
+    M = boxes2.shape[0]
+
+    # Extract cx, cy, w, h
+    cx1, cy1, w1, h1 = boxes1[:, 0], boxes1[:, 1], boxes1[:, 2], boxes1[:, 3]
+    cx2, cy2, w2, h2 = boxes2[:, 0], boxes2[:, 1], boxes2[:, 2], boxes2[:, 3]
+
+    # Compute pairwise center distances: [N, M]
+    # Treat each box as 2D Gaussian: mean = (cx, cy), covariance diagonal (w^2, h^2)
+    cx1 = cx1[:, None]  # [N, 1]
+    cy1 = cy1[:, None]
+    w1 = w1[:, None]
+    h1 = h1[:, None]
+
+    cx2 = cx2[None, :]  # [1, M]
+    cy2 = cy2[None, :]
+    w2 = w2[None, :]
+    h2 = h2[None, :]
+
+    # Wasserstein-2 distance between two 2D Gaussians with diagonal covariance:
+    # W_2^2 = ||mu1 - mu2||^2 + ||sigma1 - sigma2||^2
+    # where sigma is the std dev (w/2, h/2 treating w, h as ~2*std)
+
+    # Center distance term
+    center_dist_sq = (cx1 - cx2).pow(2) + (cy1 - cy2).pow(2)
+
+    # Covariance distance term (using w, h as measures of spread)
+    # Normalize by geometric mean of box scales to make it scale-invariant
+    w_dist = (w1 / 2.0 - w2 / 2.0).pow(2)
+    h_dist = (h1 / 2.0 - h2 / 2.0).pow(2)
+    cov_dist_sq = w_dist + h_dist
+
+    # Normalization constant: geometric mean of box diagonals
+    # diagonal = sqrt(w^2 + h^2)
+    diag1 = (w1.pow(2) + h1.pow(2)).sqrt()
+    diag2 = (w2.pow(2) + h2.pow(2)).sqrt()
+    normalize = (diag1 * diag2).clamp(min=eps)
+
+    # Normalized Wasserstein distance
+    wasserstein_dist = (center_dist_sq + cov_dist_sq).sqrt()
+    nwd = torch.exp(- (wasserstein_dist / (normalize + eps)).pow(2) / 2.0)
+
+    return nwd

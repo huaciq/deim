@@ -1,15 +1,18 @@
-# DEIM-D-FINE-M / OGSOD 120-epoch adaptation from COCO initialization.
+# DEIM-D-FINE-M / OGSOD-1.0 SAR-only 120-epoch baseline
+# Medium model reference for comparison with S + modules.
 __include__: ['./deim_hgnetv2_m_coco.yml']
 
 output_dir: /home/zxy/sar/experiments/deim_dfine_m_ogsod_baseline_120e/seed0
 use_ema: True
 use_amp: True
+
 num_classes: 3
 remap_mscoco_category: False
 
 HGNetv2:
   pretrained: False
 
+# OGSOD adaptation: 120 epochs matching S baseline for fair comparison
 epoches: 120
 warmup_iter: 1000
 flat_epoch: 60
@@ -18,7 +21,6 @@ checkpoint_freq: 10
 print_freq: 50
 
 train_dataloader:
-  # Global batch across both GPUs; retain the S-run batch for comparison.
   total_batch_size: 32
   num_workers: 4
   dataset:

@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 from typing import Dict
 
-from .box_ops import box_cxcywh_to_xyxy, generalized_box_iou
+from .box_ops import box_cxcywh_to_xyxy, generalized_box_iou, wasserstein_distance_normalized
 
 from ..core import register
 import numpy as np
@@ -36,11 +36,13 @@ class HungarianMatcher(nn.Module):
             cost_class: This is the relative weight of the classification error in the matching cost
             cost_bbox: This is the relative weight of the L1 error of the bounding box coordinates in the matching cost
             cost_giou: This is the relative weight of the giou loss of the bounding box in the matching cost
+            cost_nwd: This is the relative weight of the normalized Wasserstein distance in the matching cost
         """
         super().__init__()
         self.cost_class = weight_dict['cost_class']
         self.cost_bbox = weight_dict['cost_bbox']
         self.cost_giou = weight_dict['cost_giou']
+        self.cost_nwd = weight_dict.get('cost_nwd', 0.0)
 
         self.use_focal_loss = use_focal_loss
         self.alpha = alpha
@@ -100,8 +102,14 @@ class HungarianMatcher(nn.Module):
         # Compute the giou cost betwen boxes
         cost_giou = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox))
 
-        # Final cost matrix 3 * self.cost_bbox + 2 * self.cost_class + self.cost_giou
-        C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
+        # Compute the NWD cost between boxes (optional, for small object detection)
+        if self.cost_nwd > 0:
+            cost_nwd = -wasserstein_distance_normalized(out_bbox, tgt_bbox)
+        else:
+            cost_nwd = 0
+
+        # Final cost matrix 3 * self.cost_bbox + 2 * self.cost_class + self.cost_giou + cost_nwd
+        C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou + self.cost_nwd * cost_nwd
         C = C.view(bs, num_queries, -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]

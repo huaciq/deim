@@ -15,7 +15,7 @@ import torchvision
 import copy
 
 from .dfine_utils import bbox2distance
-from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou
+from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou, wasserstein_distance_normalized
 from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
@@ -159,6 +159,16 @@ class DEIMCriterion(nn.Module):
             box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes)))
         loss_giou = loss_giou if boxes_weight is None else loss_giou * boxes_weight
         losses['loss_giou'] = loss_giou.sum() / num_boxes
+
+        # Add NWD loss for small object detection (optional)
+        if 'loss_nwd' in self.weight_dict:
+            # Cast to float32 to avoid numerical issues under AMP
+            src_boxes_f32 = src_boxes.float()
+            target_boxes_f32 = target_boxes.float()
+            nwd_matrix = wasserstein_distance_normalized(src_boxes_f32, target_boxes_f32)
+            nwd_scores = torch.diag(nwd_matrix)
+            loss_nwd = 1 - nwd_scores
+            losses['loss_nwd'] = loss_nwd.sum() / num_boxes
 
         return losses
 

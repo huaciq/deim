@@ -1,0 +1,15 @@
+# E2: Inject P2 (stride-4) detail into P3 via Haar Wavelet Downsampling
+# Preserves high-frequency information for small object localization.
+__include__: ['./deim_hgnetv2_s_ogsod_120e.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_hwd/seed0
+
+# Backbone now returns 4 levels: [P2@stride4, S3@stride8, S4@stride16, S5@stride32]
+HGNetv2:
+  return_idx: [0, 1, 2, 3]
+  pretrained: False
+
+# Encoder injects P2 (64 channels) into S3
+HybridEncoder:
+  in_channels: [256, 512, 1024]
+  p2_channels: 64

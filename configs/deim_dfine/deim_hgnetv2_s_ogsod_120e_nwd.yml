@@ -1,0 +1,13 @@
+# E1: Add Normalized Wasserstein Distance to matcher and loss for small object detection
+# Inherits OGSOD 120e baseline, adds NWD cost and loss terms.
+__include__: ['./deim_hgnetv2_s_ogsod_120e.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_nwd/seed0
+
+DEIMCriterion:
+  weight_dict: {loss_mal: 1, loss_bbox: 5, loss_giou: 2, loss_nwd: 2, loss_fgl: 0.15, loss_ddf: 1.5}
+  matcher:
+    type: HungarianMatcher
+    weight_dict: {cost_class: 2, cost_bbox: 5, cost_giou: 2, cost_nwd: 2}
+    alpha: 0.25
+    gamma: 2.0

@@ -20,6 +20,55 @@ from ..core import register
 __all__ = ['HybridEncoder']
 
 
+class HaarDownsample(nn.Module):
+    """Haar Wavelet Downsampling (HWD) module for lossless 2x spatial downsampling.
+
+    Decomposes a feature map into four subbands (LL, LH, HL, HH) using Haar wavelets,
+    then projects to the target channel dimension. Preserves information while reducing
+    spatial resolution, useful for injecting high-resolution detail features.
+
+    Based on "Haar Wavelet Downsampling" (https://arxiv.org/abs/2207.13164).
+    """
+
+    def __init__(self, in_channels, out_channels, act='silu'):
+        super().__init__()
+        # Haar outputs 4x channels after decomposition
+        self.proj = nn.Sequential(
+            nn.Conv2d(in_channels * 4, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            get_activation(act)
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x: [B, C, H, W] input feature map
+
+        Returns:
+            [B, out_channels, H//2, W//2] downsampled feature
+        """
+        B, C, H, W = x.shape
+
+        # Haar wavelet decomposition via pixel shuffling
+        # Split into 4 phase-shifted grids
+        x00 = x[:, :, 0::2, 0::2]  # Top-left
+        x01 = x[:, :, 0::2, 1::2]  # Top-right
+        x10 = x[:, :, 1::2, 0::2]  # Bottom-left
+        x11 = x[:, :, 1::2, 1::2]  # Bottom-right
+
+        # Compute Haar basis: LL (low-pass), LH, HL, HH (high-pass)
+        ll = (x00 + x01 + x10 + x11) * 0.5  # Average
+        lh = (x00 + x01 - x10 - x11) * 0.5  # Horizontal edge
+        hl = (x00 - x01 + x10 - x11) * 0.5  # Vertical edge
+        hh = (x00 - x01 - x10 + x11) * 0.5  # Diagonal edge
+
+        # Concatenate subbands: [B, 4C, H//2, W//2]
+        y = torch.cat([ll, lh, hl, hh], dim=1)
+
+        # Project to output channels
+        return self.proj(y)
+
+
 class ConvNormLayer_fuse(nn.Module):
     def __init__(self, ch_in, ch_out, kernel_size, stride, g=1, padding=None, bias=False, act=None):
         super().__init__()
@@ -300,6 +349,7 @@ class HybridEncoder(nn.Module):
                  act='silu',
                  eval_spatial_size=None,
                  version='dfine',
+                 p2_channels=None,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -311,6 +361,18 @@ class HybridEncoder(nn.Module):
         self.eval_spatial_size = eval_spatial_size
         self.out_channels = [hidden_dim for _ in range(len(in_channels))]
         self.out_strides = feat_strides
+        self.p2_channels = p2_channels
+
+        # Optional P2 detail injection via Haar wavelet downsampling
+        if p2_channels is not None:
+            self.p2_inject = nn.Sequential(
+                HaarDownsample(p2_channels, hidden_dim, act=act),
+                ConvNormLayer_fuse(hidden_dim, hidden_dim, 1, 1, act=None)
+            )
+            # Zero-init the final BN to make this branch a no-op initially
+            nn.init.zeros_(self.p2_inject[1].norm.weight)
+        else:
+            self.p2_inject = None
 
         # channel projection
         self.input_proj = nn.ModuleList()
@@ -393,8 +455,21 @@ class HybridEncoder(nn.Module):
         return torch.concat([out_w.sin(), out_w.cos(), out_h.sin(), out_h.cos()], dim=1)[None, :, :]
 
     def forward(self, feats):
-        assert len(feats) == len(self.in_channels)
-        proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+        # Handle P2 injection if enabled
+        if self.p2_inject is not None:
+            # Backbone returns 4 features: [P2, S3, S4, S5] when p2_channels is set
+            # P2 is at stride 4, we downsample and fuse into S3 (stride 8)
+            assert len(feats) == len(self.in_channels) + 1
+            p2_feat = feats[0]
+            feats = feats[1:]  # Use S3, S4, S5 for main path
+
+            # Inject P2 detail into S3
+            p2_down = self.p2_inject(p2_feat)
+            proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+            proj_feats[0] = proj_feats[0] + p2_down  # Residual injection
+        else:
+            assert len(feats) == len(self.in_channels)
+            proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
 
         # encoder
         if self.num_encoder_layers > 0:
