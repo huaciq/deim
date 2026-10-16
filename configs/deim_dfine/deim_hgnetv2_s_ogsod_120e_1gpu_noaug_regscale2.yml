@@ -1,0 +1,9 @@
+# F2: Single-GPU baseline + removed augmentations + finer regression scale
+# Tests whether reg_scale=2 (vs default 4) improves small-object localization.
+
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_noaug_regscale2/seed0
+
+DFINETransformer:
+  reg_scale: 2  # Finer-grained regression for tiny objects (default: 4)
