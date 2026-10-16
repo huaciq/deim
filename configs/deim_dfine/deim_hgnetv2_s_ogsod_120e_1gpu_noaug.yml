@@ -1,0 +1,57 @@
+# Single-GPU baseline with harmful augmentations removed
+# Use this as the new baseline for single-GPU experiments (batch 32 per GPU).
+# Removes RandomZoomOut and RandomIoUCrop that may hurt tiny SAR objects.
+
+__include__: ['./deim_hgnetv2_s_ogsod.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_noaug/seed0
+use_ema: True
+use_amp: True
+
+num_classes: 3
+remap_mscoco_category: False
+
+HGNetv2:
+  pretrained: False
+
+# 120 epoch schedule
+epoches: 120
+warmup_iter: 1000
+flat_epoch: 60
+no_aug_epoch: 8
+checkpoint_freq: 10
+print_freq: 50
+
+train_dataloader:
+  # Single GPU: batch 32 per GPU (global batch = 32)
+  total_batch_size: 32
+  num_workers: 4
+  dataset:
+    img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar
+    ann_file: /data2/zxy/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/train.json
+    transforms:
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5],
+           probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        # Removed: RandomZoomOut (shrinks small objects)
+        # Removed: RandomIoUCrop (may cut small objects)
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [640, 640], }
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        epoch: [4, 60, 112]
+        ops: ['Mosaic', 'RandomPhotometricDistort']  # Only keep safe augmentations
+  collate_fn:
+    mixup_epochs: [4, 60]
+    stop_epoch: 112
+
+val_dataloader:
+  total_batch_size: 16
+  num_workers: 4
+  dataset:
+    img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar
+    ann_file: /data2/zxy/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/val.json
