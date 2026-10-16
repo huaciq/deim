@@ -1,0 +1,24 @@
+# F1: Remove potentially harmful augmentations (RandomZoomOut, RandomIoUCrop)
+# These shrink already-small SAR targets, potentially hurting small-object AP.
+__include__: ['./deim_hgnetv2_s_ogsod_120e.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_f1_noaug/seed0
+
+train_dataloader:
+  dataset:
+    transforms:
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5],
+           probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        # Removed: RandomZoomOut (shrinks small objects)
+        # Removed: RandomIoUCrop (may cut small objects)
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [640, 640], }
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        epoch: [4, 60, 112]
+        ops: ['Mosaic', 'RandomPhotometricDistort']  # Only keep these two

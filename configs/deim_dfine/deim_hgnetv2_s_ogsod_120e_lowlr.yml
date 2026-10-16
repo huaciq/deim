@@ -1,0 +1,17 @@
+# F3: Lower backbone learning rate and increase warmup for stable fine-tuning
+# Small objects are sensitive to LR; 0.0002 may cause early-stage instability.
+__include__: ['./deim_hgnetv2_s_ogsod_120e.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_f3_lowlr/seed0
+
+warmup_iter: 2000  # Increased from 1000
+
+optimizer:
+  params:
+    -
+      params: '^(?=.*backbone)(?!.*bn).*$'
+      lr: 0.0001  # Halved from 0.0002
+    -
+      params: '^(?=.*(?:norm|bn)).*$'
+      weight_decay: 0.
+  lr: 0.0004  # Encoder/decoder LR unchanged

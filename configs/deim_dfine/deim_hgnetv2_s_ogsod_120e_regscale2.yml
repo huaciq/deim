@@ -1,0 +1,8 @@
+# F2: Lower reg_scale from 4 to 2 for finer-grained regression on tiny objects
+# D-FINE's default reg_scale=4 may be too coarse for OGSOD's 11px median object size.
+__include__: ['./deim_hgnetv2_s_ogsod_120e.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_f2_regscale2/seed0
+
+DFINETransformer:
+  reg_scale: 2  # Changed from 4 to 2 for small-object precision
