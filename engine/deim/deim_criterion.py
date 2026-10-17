@@ -16,6 +16,7 @@ import copy
 
 from .dfine_utils import bbox2distance
 from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou, wasserstein_distance_normalized
+from .sar_boundary import generate_gt_boundary_map
 from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
@@ -170,6 +171,13 @@ class DEIMCriterion(nn.Module):
             loss_nwd = 1 - nwd_scores
             losses['loss_nwd'] = loss_nwd.sum() / num_boxes
 
+        # Add Boundary Refinement Loss (BRL) for SAR small objects (optional, training only)
+        if 'loss_brl' in self.weight_dict and 'pred_boundary_feats' in outputs and 'gt_boundary_feats' in outputs:
+            pred_boundary = outputs['pred_boundary_feats'][idx]
+            gt_boundary = outputs['gt_boundary_feats'][idx]
+            loss_brl = F.mse_loss(pred_boundary, gt_boundary, reduction='mean')
+            losses['loss_brl'] = loss_brl
+
         return losses
 
     def loss_local(self, outputs, targets, indices, num_boxes, T=5):
@@ -223,6 +231,44 @@ class DEIMCriterion(nn.Module):
                     losses['loss_ddf'] = (loss_match_local1 * self.num_pos + loss_match_local2 * self.num_neg) / (self.num_pos + self.num_neg)
 
         return losses
+
+    def loss_boundary(self, outputs, targets, feat_stride=8):
+        """Compute Boundary Consistency Map (BCM) auxiliary loss.
+
+        This loss trains the encoder to extract boundary features,
+        which indirectly improves localization quality.
+
+        Args:
+            outputs: dict containing 'boundary_map' [B, 1, H, W]
+            targets: list of dicts with 'boxes' and 'labels'
+            feat_stride: spatial stride of boundary map
+
+        Returns:
+            dict with 'loss_bcm'
+        """
+        if 'boundary_map' not in outputs:
+            return {}
+
+        pred_boundary = outputs['boundary_map']  # [B, 1, H, W]
+        B, _, H, W = pred_boundary.shape
+
+        # Generate GT boundary maps
+        gt_boundary = generate_gt_boundary_map(
+            targets, H, W, feat_stride=feat_stride, line_width=2
+        )  # [B, 1, H, W]
+
+        # BCE loss with class rebalancing (boundaries are sparse)
+        # Compute positive weight (balance foreground/background)
+        num_pos = (gt_boundary > 0.5).sum().clamp(min=1.0)
+        num_neg = (gt_boundary <= 0.5).sum().clamp(min=1.0)
+        pos_weight = num_neg / num_pos
+
+        loss_bcm = F.binary_cross_entropy_with_logits(
+            pred_boundary, gt_boundary,
+            pos_weight=pos_weight.clamp(max=10.0)  # Prevent extreme imbalance
+        )
+
+        return {'loss_bcm': loss_bcm}
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
@@ -415,6 +461,13 @@ class DEIMCriterion(nn.Module):
                     l_dict = {k: l_dict[k] * self.weight_dict[k] for k in l_dict if k in self.weight_dict}
                     l_dict = {k + '_dn_pre': v for k, v in l_dict.items()}
                     losses.update(l_dict)
+
+        # Boundary Consistency Map (BCM) auxiliary loss (training only)
+        if 'loss_bcm' in self.weight_dict and 'boundary_map' in outputs:
+            bcm_loss_dict = self.loss_boundary(outputs, targets, feat_stride=8)
+            if bcm_loss_dict:
+                bcm_loss_dict = {k: v * self.weight_dict[k] for k, v in bcm_loss_dict.items() if k in self.weight_dict}
+                losses.update(bcm_loss_dict)
 
         # For debugging Objects365 pre-train.
         losses = {k:torch.nan_to_num(v, nan=0.0) for k, v in losses.items()}

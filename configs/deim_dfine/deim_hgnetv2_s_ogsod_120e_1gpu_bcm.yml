@@ -1,0 +1,26 @@
+# BCM: Boundary Consistency Map for SAR small object localization quality
+# Extracts boundary features from encoder to evaluate query quality.
+#
+# Key difference from competing methods:
+# - DHQ/PaQ: use IoU prediction (scalar), we use boundary map (spatial)
+# - SA-DETR: uses external SAM (two-stage), we are end-to-end
+# - CGAQ: uses only corners, we use complete boundary
+
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_bcm/seed0
+
+# Enable BCM module (boundary-aware query scoring)
+# Implementation note: This requires decoder modification to integrate BCM.
+# For now, we test BCM impact via auxiliary supervision in encoder.
+
+HybridEncoder:
+  in_channels: [256, 512, 1024]
+  # Add boundary extraction branch
+  use_boundary_map: True  # Enable BCM
+  boundary_hidden_dim: 64
+
+# Add boundary consistency loss (optional, training-only)
+DEIMCriterion:
+  weight_dict: {loss_mal: 1, loss_bbox: 5, loss_giou: 2, loss_fgl: 0.15, loss_ddf: 1.5, loss_bcm: 0.5}
+  # loss_bcm: boundary consistency auxiliary loss

@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .utils import get_activation
+from .sar_boundary import BoundaryConsistencyMap
 
 from ..core import register
 
@@ -350,6 +351,8 @@ class HybridEncoder(nn.Module):
                  eval_spatial_size=None,
                  version='dfine',
                  p2_channels=None,
+                 use_boundary_map=False,
+                 boundary_hidden_dim=64,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -362,6 +365,7 @@ class HybridEncoder(nn.Module):
         self.out_channels = [hidden_dim for _ in range(len(in_channels))]
         self.out_strides = feat_strides
         self.p2_channels = p2_channels
+        self.use_boundary_map = use_boundary_map
 
         # Optional P2 detail injection via Haar wavelet downsampling
         if p2_channels is not None:
@@ -373,6 +377,16 @@ class HybridEncoder(nn.Module):
             nn.init.zeros_(self.p2_inject[1].norm.weight)
         else:
             self.p2_inject = None
+
+        # Optional Boundary Consistency Map (BCM) for SAR small objects
+        if use_boundary_map:
+            self.boundary_map = BoundaryConsistencyMap(
+                in_channels=hidden_dim,
+                hidden_dim=boundary_hidden_dim,
+                act=act
+            )
+        else:
+            self.boundary_map = None
 
         # channel projection
         self.input_proj = nn.ModuleList()
@@ -505,4 +519,9 @@ class HybridEncoder(nn.Module):
             out = self.pan_blocks[idx](torch.concat([downsample_feat, feat_height], dim=1))
             outs.append(out)
 
-        return outs
+        # Extract boundary map if enabled (use stride-8 feature for better resolution)
+        if self.boundary_map is not None:
+            boundary_output = self.boundary_map(outs[0])  # Use finest scale (stride-8)
+            return outs, boundary_output
+        else:
+            return outs
