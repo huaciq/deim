@@ -252,10 +252,11 @@ class DEIMCriterion(nn.Module):
         pred_boundary = outputs['boundary_map']  # [B, 1, H, W]
         B, _, H, W = pred_boundary.shape
 
-        # Generate GT boundary maps
+        # Generate GT boundary maps (on same device as pred_boundary)
         gt_boundary = generate_gt_boundary_map(
             targets, H, W, feat_stride=feat_stride, line_width=2
         )  # [B, 1, H, W]
+        gt_boundary = gt_boundary.to(pred_boundary.device)  # Ensure same device
 
         # BCE loss with class rebalancing (boundaries are sparse)
         # Compute positive weight (balance foreground/background)
