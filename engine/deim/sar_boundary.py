@@ -11,7 +11,7 @@ Modules for boundary-aware localization quality enhancement:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .common import get_activation
+from .utils import get_activation
 
 
 class BoundaryConsistencyMap(nn.Module):
