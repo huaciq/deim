@@ -21,6 +21,7 @@ from .dfine_utils import weighting_function, distance2bbox
 from .denoising import get_contrastive_denoising_training_group
 from .utils import deformable_attention_core_func_v2, get_activation, inverse_sigmoid
 from .utils import bias_init_with_prob
+from .scatter_clutter_suppression import ScatterAwareClutterSuppression
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -428,6 +429,8 @@ class DFINETransformer(nn.Module):
                  reg_scale=4.,
                  layer_scale=1,
                  mlp_act='relu',
+                 use_scas=False,
+                 scas_num_clutter_types=3,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -516,6 +519,17 @@ class DFINETransformer(nn.Module):
         if self.eval_spatial_size:
             self.anchors, self.valid_mask = self._generate_anchors()
 
+        # Optional Scatter-Aware Clutter Suppression (SCAS) for SAR
+        self.use_scas = use_scas
+        if use_scas:
+            self.scas = ScatterAwareClutterSuppression(
+                hidden_dim=hidden_dim,
+                num_clutter_types=scas_num_clutter_types,
+                act=activation,
+                dropout=dropout
+            )
+        else:
+            self.scas = None
 
         self._reset_parameters(feat_channels)
 
@@ -756,6 +770,32 @@ class DFINETransformer(nn.Module):
                    'ref_points': out_refs[-1], 'up': self.up, 'reg_scale': self.reg_scale}
         else:
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1]}
+
+        # Apply SCAS (Scatter-Aware Clutter Suppression) if enabled
+        if self.scas is not None:
+            # Reconstruct stride-8 encoder feature from memory
+            # memory: list of [B, H*W, C] for each level
+            # spatial_shapes: [num_levels, 2] (H, W for each level)
+            B = memory[0].shape[0]
+            H_s8, W_s8 = spatial_shapes[0]  # Stride-8 is first level
+            encoder_feat_s8 = memory[0].permute(0, 2, 1).reshape(B, -1, H_s8, W_s8)  # [B, C, H, W]
+
+            query_embeds = init_ref_contents  # [B, num_queries, C]
+            ref_points = torch.sigmoid(init_ref_points_unact)  # [B, num_queries, 2]
+
+            suppression_weights, scatter_map = self.scas(
+                encoder_feat_s8, query_embeds, ref_points
+            )
+
+            # Apply suppression to final logits
+            out['pred_logits'] = self.scas.apply_suppression(
+                out['pred_logits'], suppression_weights
+            )
+
+            # Store for visualization/analysis
+            if self.training:
+                out['scas_weights'] = suppression_weights
+                out['scatter_map'] = scatter_map
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],

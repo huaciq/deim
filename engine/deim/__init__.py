@@ -17,3 +17,5 @@ from .rtdetrv2_decoder import RTDETRTransformerv2
 from .postprocessor import PostProcessor
 from .deim_criterion import DEIMCriterion
 from .sar_boundary import BoundaryConsistencyMap, ShapeAdaptiveScoring
+from .scatter_clutter_suppression import ScatterAwareClutterSuppression
+from .detail_preservation import DetailPreservationModule

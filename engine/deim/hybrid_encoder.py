@@ -15,6 +15,7 @@ import torch.nn.functional as F
 
 from .utils import get_activation
 from .sar_boundary import BoundaryConsistencyMap
+from .detail_preservation import DetailPreservationModule
 
 from ..core import register
 
@@ -353,6 +354,7 @@ class HybridEncoder(nn.Module):
                  p2_channels=None,
                  use_boundary_map=False,
                  boundary_hidden_dim=64,
+                 use_detail_preservation=False,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -366,6 +368,7 @@ class HybridEncoder(nn.Module):
         self.out_strides = feat_strides
         self.p2_channels = p2_channels
         self.use_boundary_map = use_boundary_map
+        self.use_detail_preservation = use_detail_preservation
 
         # Optional P2 detail injection via Haar wavelet downsampling
         if p2_channels is not None:
@@ -387,6 +390,19 @@ class HybridEncoder(nn.Module):
             )
         else:
             self.boundary_map = None
+
+        # Optional Detail Preservation Module (DPM) for SAR small objects
+        # DPM requires P2 feature (stride 4) to inject details into stride 8
+        if use_detail_preservation:
+            if p2_channels is None:
+                raise ValueError("DPM requires p2_channels to be set for stride-4 features")
+            self.detail_preservation = DetailPreservationModule(
+                in_channels=p2_channels,
+                out_channels=hidden_dim,
+                act=act
+            )
+        else:
+            self.detail_preservation = None
 
         # channel projection
         self.input_proj = nn.ModuleList()
@@ -470,11 +486,12 @@ class HybridEncoder(nn.Module):
 
     def forward(self, feats):
         # Handle P2 injection if enabled
+        p2_feat = None
         if self.p2_inject is not None:
             # Backbone returns 4 features: [P2, S3, S4, S5] when p2_channels is set
             # P2 is at stride 4, we downsample and fuse into S3 (stride 8)
             assert len(feats) == len(self.in_channels) + 1
-            p2_feat = feats[0]
+            p2_feat = feats[0]  # Save P2 for DPM
             feats = feats[1:]  # Use S3, S4, S5 for main path
 
             # Inject P2 detail into S3
@@ -499,6 +516,11 @@ class HybridEncoder(nn.Module):
 
                 memory :torch.Tensor = self.encoder[i](src_flatten, pos_embed=pos_embed)
                 proj_feats[enc_ind] = memory.permute(0, 2, 1).reshape(-1, self.hidden_dim, h, w).contiguous()
+
+        # Apply Detail Preservation Module (DPM) after encoder, before FPN
+        # DPM fuses P2 (stride 4) details into stride 8 encoder output
+        if self.detail_preservation is not None and p2_feat is not None:
+            proj_feats[0] = self.detail_preservation(p2_feat, proj_feats[0])
 
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]
