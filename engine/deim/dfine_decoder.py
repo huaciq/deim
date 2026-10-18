@@ -772,28 +772,31 @@ class DFINETransformer(nn.Module):
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1]}
 
         # Apply SCAS (Scatter-Aware Clutter Suppression) if enabled
-        if self.scas is not None:
+        if self.scas is not None and self.training:
             # Reconstruct stride-8 encoder feature from memory
             # memory: list of [B, H*W, C] for each level
             # spatial_shapes: [num_levels, 2] (H, W for each level)
             B = memory[0].shape[0]
-            H_s8, W_s8 = spatial_shapes[0]  # Stride-8 is first level
-            encoder_feat_s8 = memory[0].permute(0, 2, 1).reshape(B, -1, H_s8, W_s8)  # [B, C, H, W]
 
-            query_embeds = init_ref_contents  # [B, num_queries, C]
-            ref_points = torch.sigmoid(init_ref_points_unact)  # [B, num_queries, 2]
+            # Check if memory has correct shape (profiler may pass 2D tensor)
+            if memory[0].dim() == 3:  # Normal case: [B, H*W, C]
+                H_s8, W_s8 = spatial_shapes[0].tolist()  # Stride-8 is first level
+                C = memory[0].shape[-1]
+                encoder_feat_s8 = memory[0].permute(0, 2, 1).reshape(B, C, H_s8, W_s8)  # [B, C, H, W]
 
-            suppression_weights, scatter_map = self.scas(
-                encoder_feat_s8, query_embeds, ref_points
-            )
+                query_embeds = init_ref_contents  # [B, num_queries, C]
+                ref_points = torch.sigmoid(init_ref_points_unact)  # [B, num_queries, 2]
 
-            # Apply suppression to final logits
-            out['pred_logits'] = self.scas.apply_suppression(
-                out['pred_logits'], suppression_weights
-            )
+                suppression_weights, scatter_map = self.scas(
+                    encoder_feat_s8, query_embeds, ref_points
+                )
 
-            # Store for visualization/analysis
-            if self.training:
+                # Apply suppression to final logits
+                out['pred_logits'] = self.scas.apply_suppression(
+                    out['pred_logits'], suppression_weights
+                )
+
+                # Store for visualization/analysis
                 out['scas_weights'] = suppression_weights
                 out['scatter_map'] = scatter_map
 
