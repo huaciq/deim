@@ -772,14 +772,14 @@ class DFINETransformer(nn.Module):
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1]}
 
         # Apply SCAS (Scatter-Aware Clutter Suppression) if enabled
-        if self.scas is not None and self.training:
+        if self.scas is not None:
             # Reconstruct stride-8 encoder feature from memory
             # memory: list of [B, H*W, C] for each level
             # spatial_shapes: [num_levels, 2] (H, W for each level)
-            B = memory[0].shape[0]
 
             # Check if memory has correct shape (profiler may pass 2D tensor)
             if memory[0].dim() == 3:  # Normal case: [B, H*W, C]
+                B = memory[0].shape[0]
                 H_s8, W_s8 = spatial_shapes[0].tolist()  # Stride-8 is first level
                 C = memory[0].shape[-1]
                 encoder_feat_s8 = memory[0].permute(0, 2, 1).reshape(B, C, H_s8, W_s8)  # [B, C, H, W]
@@ -796,9 +796,10 @@ class DFINETransformer(nn.Module):
                     out['pred_logits'], suppression_weights
                 )
 
-                # Store for visualization/analysis
-                out['scas_weights'] = suppression_weights
-                out['scatter_map'] = scatter_map
+                # Store for visualization/analysis (only during training)
+                if self.training:
+                    out['scas_weights'] = suppression_weights
+                    out['scatter_map'] = scatter_map
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],
