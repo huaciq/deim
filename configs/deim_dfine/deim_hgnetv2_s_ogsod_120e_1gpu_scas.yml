@@ -1,0 +1,11 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# SCAS (Scatter-Aware Clutter Suppression) Configuration
+#
+# Addresses: 63.4% background FP issue from error analysis
+# Expected: reduce background FPs by 40-50%, +1.5-2 AP
+# Precision should improve from 83.6% to 90%+
+
+DFINETransformer:
+  use_scas: True
+  scas_num_clutter_types: 3  # sea, urban, speckle

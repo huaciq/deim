@@ -1,0 +1,36 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# Full SAR Small Object Detection Configuration
+# Combines: SCAS + DPM + BCM
+#
+# Expected final AP: 61.5~62 (baseline 57.9)
+# - SCAS: +1.5-2 AP (background suppression)
+# - DPM: +1-1.5 AP (detail preservation)
+# - BCM: +0.5 AP (boundary consistency)
+
+# ===== SCAS Configuration =====
+DFINETransformer:
+  use_scas: True
+  scas_num_clutter_types: 3
+
+# ===== DPM Configuration =====
+HybridEncoder:
+  use_detail_preservation: True
+  use_boundary_map: True
+  boundary_hidden_dim: 64
+  p2_channels: 96
+
+# ===== Backbone Configuration =====
+HGNetv2:
+  return_idx: [1, 2, 3, 4]  # P2, S3, S4, S5
+
+# ===== BCM Loss Configuration =====
+DEIMCriterion:
+  weight_dict: {
+    loss_mal: 1,
+    loss_bbox: 5,
+    loss_giou: 2,
+    loss_fgl: 0.15,
+    loss_ddf: 1.5,
+    loss_bcm: 0.5
+  }

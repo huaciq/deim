@@ -1,0 +1,16 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# DPM (Detail Preservation Module) Configuration
+#
+# Addresses: 12.4% tiny object miss rate from error analysis
+# Expected: improve tiny recall from 87.6% to 91-92%, +1-1.5 AP
+# Storage tank recall should improve from 83.9% to 88-90%
+
+HybridEncoder:
+  use_detail_preservation: True
+  p2_channels: 96  # P2 feature from HGNetV2 (must match backbone output)
+
+# Ensure backbone outputs P2 feature
+HGNetv2:
+  return_idx: [1, 2, 3, 4]  # Return P2, S3, S4, S5 (stride 4, 8, 16, 32)
+  # P2 at stride 4 has channels = stem_channels * 2 = 48 * 2 = 96
