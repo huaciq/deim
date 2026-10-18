@@ -12,5 +12,8 @@ HybridEncoder:
 
 # Ensure backbone outputs P2 feature
 HGNetv2:
-  return_idx: [1, 2, 3, 4]  # Return P2, S3, S4, S5 (stride 4, 8, 16, 32)
-  # P2 at stride 4 has channels = stem_channels * 2 = 48 * 2 = 96
+  return_idx: [0, 1, 2, 3]  # Return all 4 stages: stride 2, 4, 8, 16
+  # Stage 0 (stride 2): stem output, not used
+  # Stage 1 (stride 4): P2 for DPM, channels = 96
+  # Stage 2 (stride 8): S3 for encoder
+  # Stage 3 (stride 16): S4 for encoder

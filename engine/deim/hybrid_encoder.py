@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from .utils import get_activation
 from .sar_boundary import BoundaryConsistencyMap
 from .detail_preservation import DetailPreservationModule
+from .adaptive_feature_selection import AdaptiveFeatureSelection
 
 from ..core import register
 
@@ -355,6 +356,8 @@ class HybridEncoder(nn.Module):
                  use_boundary_map=False,
                  boundary_hidden_dim=64,
                  use_detail_preservation=False,
+                 use_afs=False,
+                 afs_scales=[1, 2, 3],
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -369,6 +372,7 @@ class HybridEncoder(nn.Module):
         self.p2_channels = p2_channels
         self.use_boundary_map = use_boundary_map
         self.use_detail_preservation = use_detail_preservation
+        self.use_afs = use_afs
 
         # Optional P2 detail injection via Haar wavelet downsampling
         if p2_channels is not None:
@@ -403,6 +407,17 @@ class HybridEncoder(nn.Module):
             )
         else:
             self.detail_preservation = None
+
+        # Optional Adaptive Feature Selection (AFS) for small objects
+        # AFS enhances stride-8 features with multi-scale information
+        if use_afs:
+            self.afs = AdaptiveFeatureSelection(
+                channels=hidden_dim,
+                scales=afs_scales,
+                act=act
+            )
+        else:
+            self.afs = None
 
         # channel projection
         self.input_proj = nn.ModuleList()
@@ -521,6 +536,11 @@ class HybridEncoder(nn.Module):
         # DPM fuses P2 (stride 4) details into stride 8 encoder output
         if self.detail_preservation is not None and p2_feat is not None:
             proj_feats[0] = self.detail_preservation(p2_feat, proj_feats[0])
+
+        # Apply Adaptive Feature Selection (AFS) to stride-8 feature
+        # AFS enhances multi-scale information for small objects
+        if self.afs is not None:
+            proj_feats[0] = self.afs(proj_feats[0])
 
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]

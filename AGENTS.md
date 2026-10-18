@@ -5,6 +5,14 @@ reproducibility, fair baseline comparisons, existing results, and user changes.
 Use new configs for new methods/ablations rather than silently changing the
 settings behind an existing reported result.
 
+## Research execution policy
+
+- 本仓库是论文研究基座，后续模型改进、消融实验及训练方案修改均在此基础上持续推进。
+- 在用户授权的研究范围内直接完成必要修改和实验交接，不加入防御性操作，不因假设性风险过于保守，也不增加无必要的确认流程。
+- 禁止一切哈希校验、哈希比对、哈希审计及冒烟测试（smoke test），不得将这些操作作为修改、交付或启动训练的前置条件。
+- 验证仅围绕具体改动所需的功能正确性和论文实验可复现性开展，不额外堆叠防御性检查。记录 Git revision 用于实验溯源，不属于文件哈希校验。
+- 每次涉及实验代码或配置的修改完成后，必须给出 Linux 服务器上通过 Git 更新代码、启动训练、恢复训练以及查看日志和指标的可复制命令；不能仅交付本地修改。
+
 ## Environments and transfer
 
 - Windows development repository: `F:\DEIM`; use PowerShell and `rg`.
@@ -28,7 +36,8 @@ settings behind an existing reported result.
 ## Experimental implementation and verification
 
 Inspect Git status before changes. Keep edits scoped, preserve unrelated edits,
-and test configuration construction and relevant functionality before handoff.
+and verify relevant functionality when needed for the specific change, without
+hash checks or smoke tests.
 Record config, Git revision, seed, global batch size, input size, learning rate,
 epochs, augmentation, EMA, AMP, initialization weights and evaluation protocol.
 `total_batch_size` is global across GPUs. Do not multiply it again for two GPUs.

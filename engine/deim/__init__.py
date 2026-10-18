@@ -19,3 +19,4 @@ from .deim_criterion import DEIMCriterion
 from .sar_boundary import BoundaryConsistencyMap, ShapeAdaptiveScoring
 from .scatter_clutter_suppression import ScatterAwareClutterSuppression
 from .detail_preservation import DetailPreservationModule
+from .adaptive_feature_selection import AdaptiveFeatureSelection, MultiScaleEnhancement

@@ -1,0 +1,16 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# AFS (Adaptive Feature Selection) Configuration
+#
+# Addresses: 12.4% tiny object miss rate from error analysis
+# Expected: improve tiny recall from 87.6% to 91-92%, +1-1.5 AP
+# Simple multi-scale feature enhancement with adaptive selection
+#
+# Key advantages over DPM:
+# - No backbone modification needed (no P2 requirement)
+# - Lightweight (only depthwise convs)
+# - Directly applied to stride-8 feature
+
+HybridEncoder:
+  use_afs: True
+  afs_scales: [1, 2, 3]  # 3x3, 5x5, 7x7 receptive fields
