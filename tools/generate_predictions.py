@@ -58,53 +58,69 @@ def main(args):
             # Forward
             outputs = model(samples)
 
-            # Post-process (apply NMS and score threshold)
-            if hasattr(cfg, 'postprocessor'):
-                orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).to(device)
-                results = cfg.postprocessor(outputs, orig_target_sizes)
-            else:
-                # Manual post-processing if no postprocessor defined
-                orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).to(device)
-                results = []
+            # Post-process: convert outputs to detection results
+            # outputs['pred_boxes']: [B, num_queries, 4] cxcywh normalized
+            # outputs['pred_logits']: [B, num_queries, num_classes]
 
-                for i in range(len(outputs['pred_boxes'])):
-                    # Apply score threshold and NMS manually
-                    scores, labels = outputs['pred_logits'][i].sigmoid().max(dim=-1)
-                    score_threshold = 0.3
-                    keep = scores > score_threshold
+            pred_boxes = outputs['pred_boxes']  # [B, num_queries, 4]
+            pred_logits = outputs['pred_logits']  # [B, num_queries, num_classes]
 
-                    boxes = outputs['pred_boxes'][i][keep]  # cxcywh normalized
-                    scores_filtered = scores[keep]
-                    labels_filtered = labels[keep]
+            batch_size = pred_boxes.shape[0]
 
-                    # Convert to xyxy and denormalize
-                    cx, cy, w, h = boxes.unbind(-1)
-                    boxes_xyxy = torch.stack([
-                        (cx - 0.5 * w) * orig_target_sizes[i, 1],
-                        (cy - 0.5 * h) * orig_target_sizes[i, 0],
-                        (cx + 0.5 * w) * orig_target_sizes[i, 1],
-                        (cy + 0.5 * h) * orig_target_sizes[i, 0]
-                    ], dim=-1)
-
-                    # Simple NMS (use torchvision)
-                    from torchvision.ops import nms
-                    nms_threshold = 0.5
-                    keep_nms = nms(boxes_xyxy, scores_filtered, nms_threshold)
-
-                    results.append({
-                        'boxes': boxes_xyxy[keep_nms],
-                        'scores': scores_filtered[keep_nms],
-                        'labels': labels_filtered[keep_nms]
-                    })
-
-            # Convert to COCO format
-            for i, result in enumerate(results):
+            for i in range(batch_size):
                 image_id = targets[i]['image_id'].item()
-                boxes = result['boxes'].cpu()  # [N, 4] xyxy
-                scores = result['scores'].cpu()  # [N]
-                labels = result['labels'].cpu()  # [N]
+                orig_size = targets[i]['orig_size']  # [H, W]
 
-                for box, score, label in zip(boxes, scores, labels):
+                # Get scores and labels for this image
+                scores = pred_logits[i].sigmoid()  # [num_queries, num_classes]
+                scores_per_query, labels_per_query = scores.max(dim=-1)  # [num_queries]
+
+                # Apply score threshold
+                score_threshold = 0.3
+                keep = scores_per_query > score_threshold
+
+                if keep.sum() == 0:
+                    continue
+
+                # Filter boxes, scores, labels
+                boxes_keep = pred_boxes[i][keep]  # [N, 4] cxcywh normalized
+                scores_keep = scores_per_query[keep]  # [N]
+                labels_keep = labels_per_query[keep]  # [N]
+
+                # Convert cxcywh normalized to xyxy pixel coordinates
+                cx, cy, w, h = boxes_keep.unbind(-1)
+                boxes_xyxy = torch.stack([
+                    (cx - 0.5 * w) * orig_size[1],
+                    (cy - 0.5 * h) * orig_size[0],
+                    (cx + 0.5 * w) * orig_size[1],
+                    (cy + 0.5 * h) * orig_size[0]
+                ], dim=-1)
+
+                # Apply NMS per class
+                from torchvision.ops import nms
+                nms_threshold = 0.5
+
+                keep_all = []
+                for class_id in labels_keep.unique():
+                    class_mask = labels_keep == class_id
+                    class_boxes = boxes_xyxy[class_mask]
+                    class_scores = scores_keep[class_mask]
+
+                    keep_class = nms(class_boxes, class_scores, nms_threshold)
+                    keep_all.append(torch.where(class_mask)[0][keep_class])
+
+                if len(keep_all) == 0:
+                    continue
+
+                keep_nms = torch.cat(keep_all)
+
+                # Final boxes in xyxy pixel coordinates
+                boxes_final = boxes_xyxy[keep_nms]
+                scores_final = scores_keep[keep_nms]
+                labels_final = labels_keep[keep_nms]
+
+                # Convert to COCO format (xywh)
+                for box, score, label in zip(boxes_final, scores_final, labels_final):
                     x1, y1, x2, y2 = box.tolist()
                     predictions.append({
                         'image_id': image_id,

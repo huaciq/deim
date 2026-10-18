@@ -121,14 +121,15 @@ def query_diagnosis(args):
                 if len(gt_boxes) == 0:
                     continue
 
-                # Convert to xyxy and denormalize
-                query_boxes = cxcywh_to_xyxy(pred_boxes[i])  # [num_queries, 4]
-                query_boxes[:, [0, 2]] *= orig_size[1]
-                query_boxes[:, [1, 3]] *= orig_size[0]
+                # Convert query boxes: cxcywh normalized -> xyxy pixel
+                query_boxes = cxcywh_to_xyxy(pred_boxes[i])  # [num_queries, 4] xyxy normalized
+                query_boxes[:, [0, 2]] = query_boxes[:, [0, 2]] * orig_size[1]  # x coords
+                query_boxes[:, [1, 3]] = query_boxes[:, [1, 3]] * orig_size[0]  # y coords
 
-                gt_boxes_xyxy = cxcywh_to_xyxy(gt_boxes)
-                gt_boxes_xyxy[:, [0, 2]] *= orig_size[1]
-                gt_boxes_xyxy[:, [1, 3]] *= orig_size[0]
+                # Convert GT boxes: cxcywh normalized -> xyxy pixel
+                gt_boxes_xyxy = cxcywh_to_xyxy(gt_boxes)  # [N, 4] xyxy normalized
+                gt_boxes_xyxy[:, [0, 2]] = gt_boxes_xyxy[:, [0, 2]] * orig_size[1]  # x coords
+                gt_boxes_xyxy[:, [1, 3]] = gt_boxes_xyxy[:, [1, 3]] * orig_size[0]  # y coords
 
                 # Compute IoU between all queries and all GTs
                 iou_matrix = box_iou(query_boxes, gt_boxes_xyxy)  # [num_queries, num_gts]
