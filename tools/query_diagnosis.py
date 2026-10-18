@@ -114,9 +114,9 @@ def query_diagnosis(args):
 
             for i in range(batch_size):
                 # Get GT for this image
-                gt_boxes = targets[i]['boxes']  # [N, 4] cxcywh normalized
-                gt_labels = targets[i]['labels']  # [N]
-                orig_size = targets[i]['orig_size']  # [H, W]
+                gt_boxes = targets[i]['boxes'].to(device)  # [N, 4] cxcywh normalized - move to device
+                gt_labels = targets[i]['labels'].to(device)  # [N] - move to device
+                orig_size = targets[i]['orig_size'].to(device)  # [H, W] - move to device
 
                 if len(gt_boxes) == 0:
                     continue

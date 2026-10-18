@@ -58,12 +58,44 @@ def main(args):
             # Forward
             outputs = model(samples)
 
-            # Post-process
+            # Post-process (apply NMS and score threshold)
             if hasattr(cfg, 'postprocessor'):
                 orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).to(device)
                 results = cfg.postprocessor(outputs, orig_target_sizes)
             else:
-                results = outputs
+                # Manual post-processing if no postprocessor defined
+                orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).to(device)
+                results = []
+
+                for i in range(len(outputs['pred_boxes'])):
+                    # Apply score threshold and NMS manually
+                    scores, labels = outputs['pred_logits'][i].sigmoid().max(dim=-1)
+                    score_threshold = 0.3
+                    keep = scores > score_threshold
+
+                    boxes = outputs['pred_boxes'][i][keep]  # cxcywh normalized
+                    scores_filtered = scores[keep]
+                    labels_filtered = labels[keep]
+
+                    # Convert to xyxy and denormalize
+                    cx, cy, w, h = boxes.unbind(-1)
+                    boxes_xyxy = torch.stack([
+                        (cx - 0.5 * w) * orig_target_sizes[i, 1],
+                        (cy - 0.5 * h) * orig_target_sizes[i, 0],
+                        (cx + 0.5 * w) * orig_target_sizes[i, 1],
+                        (cy + 0.5 * h) * orig_target_sizes[i, 0]
+                    ], dim=-1)
+
+                    # Simple NMS (use torchvision)
+                    from torchvision.ops import nms
+                    nms_threshold = 0.5
+                    keep_nms = nms(boxes_xyxy, scores_filtered, nms_threshold)
+
+                    results.append({
+                        'boxes': boxes_xyxy[keep_nms],
+                        'scores': scores_filtered[keep_nms],
+                        'labels': labels_filtered[keep_nms]
+                    })
 
             # Convert to COCO format
             for i, result in enumerate(results):
