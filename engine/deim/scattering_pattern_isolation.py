@@ -64,6 +64,11 @@ class LocalStatisticsExtractor(nn.Module):
         # Clamp input to avoid extreme values
         x = torch.clamp(x, min=-10, max=10)
 
+        # NaN detection
+        if torch.isnan(x).any():
+            print("[WARNING] LocalStatisticsExtractor input contains NaN, replacing with zeros")
+            x = torch.where(torch.isnan(x), torch.zeros_like(x), x)
+
         # Local mean
         mean = self.avg_pool(x)
 
@@ -81,6 +86,9 @@ class LocalStatisticsExtractor(nn.Module):
 
         # Extract features from statistics
         out = self.stat_conv(stats)
+
+        # Final clamp
+        out = torch.clamp(out, min=-10, max=10)
 
         return out
 
@@ -127,6 +135,11 @@ class ScatteringDecomposer(nn.Module):
         # Clamp input for stability
         x = torch.clamp(x, min=-10, max=10)
 
+        # NaN detection
+        if torch.isnan(x).any():
+            print("[WARNING] ScatteringDecomposer input contains NaN, replacing with zeros")
+            x = torch.where(torch.isnan(x), torch.zeros_like(x), x)
+
         feat = self.analyzer(x)
         scatter_logits = self.decompose(feat)  # [B, 3, H, W]
 
@@ -135,6 +148,9 @@ class ScatteringDecomposer(nn.Module):
 
         # Softmax to get probability distribution
         scatter_probs = F.softmax(scatter_logits, dim=1)
+
+        # Ensure valid probabilities
+        scatter_probs = torch.clamp(scatter_probs, min=1e-6, max=1.0)
 
         return scatter_probs
 
@@ -197,7 +213,8 @@ class ScatteringPatternIsolation(nn.Module):
 
         # Fixed fusion strength (不可学习，避免数值爆炸)
         # 训练过程中 learnable alpha 会逐渐增大导致特征溢出
-        self.register_buffer('alpha', torch.tensor(0.2))  # 固定为 0.2
+        # 测试表明 0.3 可以保持前 50 轮的效果同时避免崩溃
+        self.register_buffer('alpha', torch.tensor(0.3))  # 提升到 0.3 保证效能
 
     def get_scattering_priors(self):
         """Get current scattering priors (固定，不学习)."""
@@ -239,8 +256,17 @@ class ScatteringPatternIsolation(nn.Module):
             scatter_probs: [B, 3, H, W] scattering decomposition (for visualization/supervision)
             target_similarity: [B, 1, H, W] target scattering similarity map
         """
-        # Clamp input features for numerical stability
+        # === 0. Input validation and clamping ===
         x = torch.clamp(x, min=-10, max=10)
+
+        if torch.isnan(x).any():
+            print("[ERROR] SPI input contains NaN! Returning original input without enhancement.")
+            # Return dummy outputs to avoid crash
+            B, C, H, W = x.shape
+            scatter_probs = torch.zeros(B, 3, H, W, device=x.device)
+            scatter_probs[:, 0] = 1.0  # All "strong scattering"
+            target_sim = torch.ones(B, 1, H, W, device=x.device)
+            return x, scatter_probs, target_sim
 
         # === 1. Extract local statistics ===
         stat_feat = self.stat_extractor(x)
@@ -260,20 +286,23 @@ class ScatteringPatternIsolation(nn.Module):
         gate_input = torch.cat([x, scatter_probs], dim=1)
         gate = self.pattern_gate(gate_input)  # [B, C, H, W]
 
+        # Clamp gate to prevent extreme values
+        gate = torch.clamp(gate, min=0, max=1)
+
         # Modulate gate by target similarity
         # High target similarity -> amplify features
         # High clutter similarity -> suppress features
         similarity_weight = target_sim - 0.5 * clutter_sim
         similarity_weight = torch.sigmoid(similarity_weight)  # Normalize to [0, 1]
-        similarity_weight = torch.clamp(similarity_weight, min=0.1, max=1.5)  # Prevent extreme values
+        similarity_weight = torch.clamp(similarity_weight, min=0.5, max=1.2)  # Conservative range
 
         modulated_gate = gate * similarity_weight
 
-        # Clamp gate to prevent extreme amplification
-        modulated_gate = torch.clamp(modulated_gate, min=0, max=2)
+        # Clamp modulated gate
+        modulated_gate = torch.clamp(modulated_gate, min=0, max=1.5)
 
         # === 5. Apply gating to features ===
-        gated_feat = x * (1.0 + modulated_gate)  # Multiplicative gating (preserves original)
+        gated_feat = x * (1.0 + modulated_gate)  # Multiplicative gating
 
         # Clamp gated features
         gated_feat = torch.clamp(gated_feat, min=-10, max=10)
@@ -281,19 +310,19 @@ class ScatteringPatternIsolation(nn.Module):
         # === 6. Residual fusion ===
         fusion_delta = self.fusion(gated_feat)
 
-        # 强制 clamp fusion delta（防止爆炸）
-        fusion_delta = torch.clamp(fusion_delta, min=-3, max=3)
+        # 强制 clamp fusion delta（最关键的稳定性保证）
+        fusion_delta = torch.clamp(fusion_delta, min=-2, max=2)
 
-        # 使用固定的小权重融合（alpha=0.2）
+        # 使用固定的 alpha=0.3 融合（平衡效能和稳定性）
         out = x + self.alpha * fusion_delta
 
         # 最终输出强制 clamp
         out = torch.clamp(out, min=-10, max=10)
 
-        # 额外检查：如果出现 NaN，直接返回原始输入
+        # === 7. Final NaN check ===
         if torch.isnan(out).any():
-            print(f"[WARNING] SPI output contains NaN, returning original input")
-            out = x
+            print("[ERROR] SPI output contains NaN! Returning original input.")
+            return x, scatter_probs, target_sim
 
         return out, scatter_probs, target_sim
 
