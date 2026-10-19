@@ -61,6 +61,9 @@ class LocalStatisticsExtractor(nn.Module):
         Returns:
             stats: [B, C, H, W] statistical features
         """
+        # Clamp input to avoid extreme values
+        x = torch.clamp(x, min=-10, max=10)
+
         # Local mean
         mean = self.avg_pool(x)
 
@@ -69,6 +72,9 @@ class LocalStatisticsExtractor(nn.Module):
         mean_squared = self.avg_pool(x_squared)
         variance = mean_squared - mean * mean
         variance = F.relu(variance)  # Ensure non-negative
+
+        # Add epsilon for numerical stability
+        variance = variance + 1e-6
 
         # Concatenate statistics
         stats = torch.cat([mean, variance], dim=1)
@@ -118,8 +124,14 @@ class ScatteringDecomposer(nn.Module):
             scatter_probs: [B, 3, H, W] probability of each scattering type
                          [strong, diffuse, random]
         """
+        # Clamp input for stability
+        x = torch.clamp(x, min=-10, max=10)
+
         feat = self.analyzer(x)
         scatter_logits = self.decompose(feat)  # [B, 3, H, W]
+
+        # Clamp logits to avoid overflow in softmax
+        scatter_logits = torch.clamp(scatter_logits, min=-10, max=10)
 
         # Softmax to get probability distribution
         scatter_probs = F.softmax(scatter_logits, dim=1)
@@ -238,6 +250,9 @@ class ScatteringPatternIsolation(nn.Module):
             scatter_probs: [B, 3, H, W] scattering decomposition (for visualization/supervision)
             target_similarity: [B, 1, H, W] target scattering similarity map
         """
+        # Clamp input features for numerical stability
+        x = torch.clamp(x, min=-10, max=10)
+
         # === 1. Extract local statistics ===
         stat_feat = self.stat_extractor(x)
 
@@ -246,6 +261,10 @@ class ScatteringPatternIsolation(nn.Module):
 
         # === 3. Compute scattering similarities ===
         target_sim, clutter_sim = self.compute_scattering_similarity(scatter_probs)
+
+        # Clamp similarities to valid range
+        target_sim = torch.clamp(target_sim, min=0, max=1)
+        clutter_sim = torch.clamp(clutter_sim, min=0, max=1)
 
         # === 4. Generate pattern-aware gate ===
         # Concatenate features with scattering info
@@ -257,15 +276,29 @@ class ScatteringPatternIsolation(nn.Module):
         # High clutter similarity -> suppress features
         similarity_weight = target_sim - 0.5 * clutter_sim
         similarity_weight = torch.sigmoid(similarity_weight)  # Normalize to [0, 1]
+        similarity_weight = torch.clamp(similarity_weight, min=0.1, max=1.5)  # Prevent extreme values
 
         modulated_gate = gate * similarity_weight
+
+        # Clamp gate to prevent extreme amplification
+        modulated_gate = torch.clamp(modulated_gate, min=0, max=2)
 
         # === 5. Apply gating to features ===
         gated_feat = x * (1.0 + modulated_gate)  # Multiplicative gating (preserves original)
 
+        # Clamp gated features
+        gated_feat = torch.clamp(gated_feat, min=-10, max=10)
+
         # === 6. Residual fusion ===
         fusion_delta = self.fusion(gated_feat)
+
+        # Clamp fusion delta
+        fusion_delta = torch.clamp(fusion_delta, min=-5, max=5)
+
         out = x + self.alpha.clamp(0, 1) * fusion_delta
+
+        # Final clamp on output
+        out = torch.clamp(out, min=-10, max=10)
 
         return out, scatter_probs, target_sim
 
