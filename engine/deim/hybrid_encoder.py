@@ -17,6 +17,7 @@ from .utils import get_activation
 from .sar_boundary import BoundaryConsistencyMap
 from .detail_preservation import DetailPreservationModule
 from .adaptive_feature_selection import AdaptiveFeatureSelection
+from .scattering_pattern_isolation import ScatteringPatternIsolation
 
 from ..core import register
 
@@ -358,6 +359,7 @@ class HybridEncoder(nn.Module):
                  use_detail_preservation=False,
                  use_afs=False,
                  afs_scales=[1, 2, 3],
+                 use_spi=False,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -373,6 +375,7 @@ class HybridEncoder(nn.Module):
         self.use_boundary_map = use_boundary_map
         self.use_detail_preservation = use_detail_preservation
         self.use_afs = use_afs
+        self.use_spi = use_spi
 
         # Optional P2 detail injection via Haar wavelet downsampling
         if p2_channels is not None:
@@ -418,6 +421,16 @@ class HybridEncoder(nn.Module):
             )
         else:
             self.afs = None
+
+        # Optional Scattering Pattern Isolation (SPI) for SAR
+        # SPI uses physics-informed scattering decomposition
+        if use_spi:
+            self.spi = ScatteringPatternIsolation(
+                channels=hidden_dim,
+                act=act
+            )
+        else:
+            self.spi = None
 
         # channel projection
         self.input_proj = nn.ModuleList()
@@ -542,6 +555,15 @@ class HybridEncoder(nn.Module):
         if self.afs is not None:
             proj_feats[0] = self.afs(proj_feats[0])
 
+        # Apply Scattering Pattern Isolation (SPI) to stride-8 feature
+        # SPI uses SAR physics to separate target/clutter scattering
+        spi_outputs = {}
+        if self.spi is not None:
+            proj_feats[0], scatter_probs, target_sim = self.spi(proj_feats[0])
+            # Store for visualization and optional supervision
+            spi_outputs['scatter_probs'] = scatter_probs
+            spi_outputs['target_similarity'] = target_sim
+
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]
         for idx in range(len(self.in_channels) - 1, 0, -1):
@@ -564,6 +586,12 @@ class HybridEncoder(nn.Module):
         # Extract boundary map if enabled (use stride-8 feature for better resolution)
         if self.boundary_map is not None:
             boundary_output = self.boundary_map(outs[0])  # Use finest scale (stride-8)
-            return outs, boundary_output
+            if self.spi is not None:
+                return outs, boundary_output, spi_outputs
+            else:
+                return outs, boundary_output
         else:
-            return outs
+            if self.spi is not None:
+                return outs, spi_outputs
+            else:
+                return outs

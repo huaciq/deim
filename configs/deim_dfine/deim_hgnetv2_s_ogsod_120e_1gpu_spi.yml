@@ -1,0 +1,24 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# SPI (Scattering Pattern Isolation) Configuration
+#
+# Innovation: Physics-informed SAR feature enhancement
+#
+# Key differences from traditional methods:
+# 1. Explicitly models SAR scattering mechanisms (strong/diffuse/random)
+# 2. Uses learned priors based on target/clutter physics
+# 3. Enhances target-like scattering, suppresses clutter-like scattering
+#
+# Expected improvements:
+# - Reduce background FPs (63.4% issue): clutter has different scattering
+# - Improve small target detection: strong scattering is more discriminative
+# - Better interpretability: scatter_probs visualization shows physical meaning
+#
+# Target: AP 57.9 -> 59.5~60.5 (+1.6~2.6)
+
+HybridEncoder:
+  use_spi: True
+
+# Reduce batch size to avoid OOM (SPI adds moderate overhead)
+train_dataloader:
+  total_batch_size: 28  # Original 32, reduced to 28 for safety

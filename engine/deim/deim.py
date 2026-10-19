@@ -26,22 +26,35 @@ class DEIM(nn.Module):
     def forward(self, x, targets=None):
         x = self.backbone(x)
 
-        # Handle encoder output (may include boundary_output for BCM)
+        # Handle encoder output (may include boundary_output and/or spi_outputs)
         encoder_out = self.encoder(x)
+
+        boundary_map = None
+        spi_outputs = None
+
         if isinstance(encoder_out, tuple):
-            # BCM enabled: (features, boundary_map)
-            x, boundary_map = encoder_out
+            if len(encoder_out) == 2:
+                # Could be (features, boundary_map) or (features, spi_outputs)
+                x, extra = encoder_out
+                if isinstance(extra, dict):
+                    spi_outputs = extra
+                else:
+                    boundary_map = extra
+            elif len(encoder_out) == 3:
+                # (features, boundary_map, spi_outputs)
+                x, boundary_map, spi_outputs = encoder_out
         else:
-            # BCM disabled: just features
             x = encoder_out
-            boundary_map = None
 
         # Pass to decoder
         decoder_out = self.decoder(x, targets)
 
-        # Attach boundary_map to decoder output for loss computation
-        if boundary_map is not None and isinstance(decoder_out, dict):
-            decoder_out['boundary_map'] = boundary_map
+        # Attach boundary_map and spi_outputs to decoder output for loss computation
+        if isinstance(decoder_out, dict):
+            if boundary_map is not None:
+                decoder_out['boundary_map'] = boundary_map
+            if spi_outputs is not None:
+                decoder_out.update(spi_outputs)
 
         return decoder_out
 
