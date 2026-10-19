@@ -21,4 +21,4 @@ HybridEncoder:
 
 # Reduce batch size to avoid OOM (SPI adds moderate overhead)
 train_dataloader:
-  total_batch_size: 28  # Original 32, reduced to 28 for safety
+  total_batch_size: 32  # Original 32, reduced to 28 for safety
