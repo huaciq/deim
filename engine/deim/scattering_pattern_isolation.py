@@ -167,15 +167,11 @@ class ScatteringPatternIsolation(nn.Module):
         # === 2. Scattering decomposition ===
         self.decomposer = ScatteringDecomposer(channels, act=act)
 
-        # === 3. Scattering priors (learnable) ===
+        # === 3. Scattering priors (固定，不学习) ===
         # Prior knowledge: targets have strong scattering, clutter is diffuse
-        # Initialize with physical intuition, then let network fine-tune
-        self.register_buffer('target_prior_init', torch.tensor([0.7, 0.2, 0.1]))  # [strong, diffuse, random]
-        self.register_buffer('clutter_prior_init', torch.tensor([0.2, 0.6, 0.2]))
-
-        # Learnable priors (deviation from initial)
-        self.target_prior_delta = nn.Parameter(torch.zeros(3))
-        self.clutter_prior_delta = nn.Parameter(torch.zeros(3))
+        # 冻结先验避免训练不稳定
+        self.register_buffer('target_prior', torch.tensor([0.7, 0.2, 0.1]))  # [strong, diffuse, random]
+        self.register_buffer('clutter_prior', torch.tensor([0.2, 0.6, 0.2]))
 
         # === 4. Pattern-based feature gating ===
         # Use scattering similarity to modulate features
@@ -199,20 +195,13 @@ class ScatteringPatternIsolation(nn.Module):
         # Initialize fusion as residual (zero-init)
         nn.init.zeros_(self.fusion[1].weight)
 
-        # Learnable fusion strength
-        self.alpha = nn.Parameter(torch.ones(1) * 0.5)
+        # Fixed fusion strength (不可学习，避免数值爆炸)
+        # 训练过程中 learnable alpha 会逐渐增大导致特征溢出
+        self.register_buffer('alpha', torch.tensor(0.2))  # 固定为 0.2
 
     def get_scattering_priors(self):
-        """Get current learned scattering priors."""
-        # Add learnable delta to initial priors
-        target_prior = self.target_prior_init + self.target_prior_delta
-        clutter_prior = self.clutter_prior_init + self.clutter_prior_delta
-
-        # Softmax to ensure valid probability distribution
-        target_prior = F.softmax(target_prior, dim=0)
-        clutter_prior = F.softmax(clutter_prior, dim=0)
-
-        return target_prior, clutter_prior
+        """Get current scattering priors (固定，不学习)."""
+        return self.target_prior, self.clutter_prior
 
     def compute_scattering_similarity(self, scatter_probs):
         """
@@ -292,13 +281,19 @@ class ScatteringPatternIsolation(nn.Module):
         # === 6. Residual fusion ===
         fusion_delta = self.fusion(gated_feat)
 
-        # Clamp fusion delta
-        fusion_delta = torch.clamp(fusion_delta, min=-5, max=5)
+        # 强制 clamp fusion delta（防止爆炸）
+        fusion_delta = torch.clamp(fusion_delta, min=-3, max=3)
 
-        out = x + self.alpha.clamp(0, 1) * fusion_delta
+        # 使用固定的小权重融合（alpha=0.2）
+        out = x + self.alpha * fusion_delta
 
-        # Final clamp on output
+        # 最终输出强制 clamp
         out = torch.clamp(out, min=-10, max=10)
+
+        # 额外检查：如果出现 NaN，直接返回原始输入
+        if torch.isnan(out).any():
+            print(f"[WARNING] SPI output contains NaN, returning original input")
+            out = x
 
         return out, scatter_probs, target_sim
 
