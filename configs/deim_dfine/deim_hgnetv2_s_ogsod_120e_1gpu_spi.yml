@@ -1,4 +1,4 @@
-__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+__include__: ["./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml"]
 
 # SPI (Scattering Pattern Isolation) Configuration
 #
@@ -21,4 +21,4 @@ HybridEncoder:
 
 # Reduce batch size to avoid OOM (SPI adds moderate overhead)
 train_dataloader:
-  total_batch_size: 32  # Original 32, reduced to 28 for safety
+  total_batch_size: 28 # Original 32, reduced to 28 for safety
