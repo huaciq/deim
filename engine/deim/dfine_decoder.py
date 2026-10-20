@@ -821,8 +821,12 @@ class DFINETransformer(nn.Module):
         if self.sbr is not None:
             query_embeds = init_ref_contents  # [B, num_queries, C]
             ref_points = torch.sigmoid(init_ref_points_unact)  # [B, num_queries, 2]
-            pred_boxes = out['pred_boxes']  # [B, num_queries, 4]
+            pred_boxes = out['pred_boxes']  # [B, num_queries, 4 or more]
             pred_logits = out['pred_logits']  # [B, num_queries, num_classes]
+
+            # Ensure pred_boxes is exactly 4-dim (cxcywh)
+            if pred_boxes.shape[-1] > 4:
+                pred_boxes = pred_boxes[..., :4]
 
             # Compute background scores
             bg_scores = self.sbr(query_embeds, ref_points, pred_boxes, pred_logits)

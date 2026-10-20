@@ -86,19 +86,19 @@ class BackgroundFeatureExtractor(nn.Module):
         embed_feat = self.embed_analyzer(query_embed)  # [B, Q, C/2]
 
         # === 2. Spatial features ===
-        # Ensure correct dimensions
-        if ref_points.dim() == 2:
-            # profiler may pass 2D tensor, add batch dimension
-            ref_points = ref_points.unsqueeze(0)
-        if pred_boxes.dim() == 2:
-            pred_boxes = pred_boxes.unsqueeze(0)
+        # Robustly handle different input shapes
 
-        # ref_points: [B, Q, 2], pred_boxes: [B, Q, 4]
-        # Handle potential extra dimensions in pred_boxes (e.g., corners)
-        if pred_boxes.shape[-1] > 4:
-            pred_boxes = pred_boxes[..., :4]  # Take only first 4 (cxcywh)
+        # Ensure ref_points is exactly [..., 2]
+        if ref_points.shape[-1] != 2:
+            ref_points = ref_points[..., :2]
 
-        spatial_input = torch.cat([ref_points, pred_boxes], dim=-1)  # [B, Q, 6]
+        # Ensure pred_boxes is exactly [..., 4]
+        if pred_boxes.shape[-1] != 4:
+            pred_boxes = pred_boxes[..., :4]
+
+        # Concatenate: should be [..., 6]
+        spatial_input = torch.cat([ref_points, pred_boxes], dim=-1)
+
         spatial_feat = self.spatial_analyzer(spatial_input)  # [B, Q, 32]
 
         # === 3. Classification logits features ===
