@@ -819,8 +819,18 @@ class DFINETransformer(nn.Module):
 
         # Apply SBR (Simple Background Rejection) if enabled
         if self.sbr is not None:
-            query_embeds = init_ref_contents  # [B, num_queries, C]
-            ref_points = torch.sigmoid(init_ref_points_unact)  # [B, num_queries, 2]
+            # Handle denoising: init_ref_* contains both dn and regular queries
+            # but out['pred_boxes'] only contains regular queries
+            if self.training and dn_meta is not None:
+                # Split to get only regular queries (matching out['pred_boxes'])
+                _, query_embeds = torch.split(init_ref_contents, dn_meta['dn_num_split'], dim=1)
+                _, ref_points_unact = torch.split(init_ref_points_unact, dn_meta['dn_num_split'], dim=1)
+                ref_points = torch.sigmoid(ref_points_unact)
+            else:
+                # No denoising, use all queries
+                query_embeds = init_ref_contents
+                ref_points = torch.sigmoid(init_ref_points_unact)
+
             pred_boxes = out['pred_boxes']  # [B, num_queries, 4 or more]
             pred_logits = out['pred_logits']  # [B, num_queries, num_classes]
 
