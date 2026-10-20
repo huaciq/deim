@@ -486,9 +486,10 @@ class DEIMCriterion(nn.Module):
 
             # Generate supervision labels
             device = bg_scores.device
+            dtype = bg_scores.dtype  # Match dtype with bg_scores (FP16 in AMP)
             B, num_queries = bg_scores.shape
             labels = torch.full((B, num_queries), -1, dtype=torch.long, device=device)
-            weights = torch.zeros((B, num_queries), dtype=torch.float32, device=device)
+            weights = torch.zeros((B, num_queries), dtype=dtype, device=device)  # Use same dtype as bg_scores
 
             for batch_idx in range(B):
                 # Positive samples: matched queries

@@ -379,7 +379,7 @@ class SBRLoss(nn.Module):
 
         # Get valid samples
         bg_scores_valid = bg_scores[valid_mask]  # [N]
-        labels_valid = labels[valid_mask].float()  # [N]
+        labels_valid = labels[valid_mask].to(bg_scores.dtype)  # Match dtype (FP16 in AMP)
         weights_valid = weights[valid_mask]  # [N]
 
         # === 1. Binary cross-entropy ===
