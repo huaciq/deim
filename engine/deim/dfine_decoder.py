@@ -22,6 +22,7 @@ from .denoising import get_contrastive_denoising_training_group
 from .utils import deformable_attention_core_func_v2, get_activation, inverse_sigmoid
 from .utils import bias_init_with_prob
 from .scatter_clutter_suppression import ScatterAwareClutterSuppression
+from .background_rejection import SimpleBackgroundRejection
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -431,6 +432,9 @@ class DFINETransformer(nn.Module):
                  mlp_act='relu',
                  use_scas=False,
                  scas_num_clutter_types=3,
+                 use_sbr=False,
+                 sbr_neg_iou_threshold=0.3,
+                 sbr_suppression_mode='multiplicative',
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -530,6 +534,18 @@ class DFINETransformer(nn.Module):
             )
         else:
             self.scas = None
+
+        # Optional Simple Background Rejection (SBR) for SAR
+        self.use_sbr = use_sbr
+        if use_sbr:
+            self.sbr = SimpleBackgroundRejection(
+                hidden_dim=hidden_dim,
+                num_classes=num_classes,
+                neg_iou_threshold=sbr_neg_iou_threshold,
+                suppression_mode=sbr_suppression_mode
+            )
+        else:
+            self.sbr = None
 
         self._reset_parameters(feat_channels)
 
@@ -800,6 +816,22 @@ class DFINETransformer(nn.Module):
                 if self.training:
                     out['scas_weights'] = suppression_weights
                     out['scatter_map'] = scatter_map
+
+        # Apply SBR (Simple Background Rejection) if enabled
+        if self.sbr is not None:
+            query_embeds = init_ref_contents  # [B, num_queries, C]
+            ref_points = torch.sigmoid(init_ref_points_unact)  # [B, num_queries, 2]
+            pred_boxes = out['pred_boxes']  # [B, num_queries, 4]
+            pred_logits = out['pred_logits']  # [B, num_queries, num_classes]
+
+            # Compute background scores
+            bg_scores = self.sbr(query_embeds, ref_points, pred_boxes, pred_logits)
+
+            # Apply suppression to logits
+            out['pred_logits'] = self.sbr.apply_suppression(pred_logits, bg_scores)
+
+            # Store background scores for loss computation
+            out['bg_scores'] = bg_scores
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],

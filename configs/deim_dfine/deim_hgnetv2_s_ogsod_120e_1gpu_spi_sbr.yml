@@ -1,0 +1,29 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# SPI + SBR Combined Configuration
+#
+# SPI (Scattering Pattern Isolation): +1.5 AP (encoder-level target enhancement)
+# SBR (Simple Background Rejection): +0.9 AP (decoder-level background suppression)
+# Expected combined: +2.6 AP (synergy: SPI makes targets clearer -> SBR distinguishes better)
+
+HybridEncoder:
+  use_spi: True
+
+DFINETransformer:
+  use_sbr: True
+  sbr_neg_iou_threshold: 0.3
+  sbr_suppression_mode: 'multiplicative'
+
+DEIMCriterion:
+  weight_dict:
+    loss_vfl: 1
+    loss_bbox: 5
+    loss_giou: 2
+    loss_fgl: 0.15
+    loss_ddf: 1.5
+    loss_mal: 1
+    loss_sbr: 0.5
+
+# Reduce batch size (SPI + SBR combined overhead ~20%)
+train_dataloader:
+  total_batch_size: 24  # Original 32, reduced to 24 for both modules

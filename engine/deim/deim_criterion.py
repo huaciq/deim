@@ -17,6 +17,7 @@ import copy
 from .dfine_utils import bbox2distance
 from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou, wasserstein_distance_normalized
 from .sar_boundary import generate_gt_boundary_map
+from .background_rejection import SBRLoss
 from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
@@ -65,6 +66,9 @@ class DEIMCriterion(nn.Module):
         self.num_pos, self.num_neg = None, None
         self.mal_alpha = mal_alpha
         self.use_uni_set = use_uni_set
+
+        # SBR loss (optional)
+        self.sbr_loss = SBRLoss(loss_weight=1.0, focal_alpha=0.25, focal_gamma=2.0)
 
     def loss_labels_focal(self, outputs, targets, indices, num_boxes):
         assert 'pred_logits' in outputs
@@ -469,6 +473,54 @@ class DEIMCriterion(nn.Module):
             if bcm_loss_dict:
                 bcm_loss_dict = {k: v * self.weight_dict[k] for k, v in bcm_loss_dict.items() if k in self.weight_dict}
                 losses.update(bcm_loss_dict)
+
+        # Simple Background Rejection (SBR) auxiliary loss (training only)
+        if 'loss_sbr' in self.weight_dict and 'bg_scores' in outputs:
+            from .background_rejection import SimpleBackgroundRejection
+            # Get the model's SBR module to access get_supervision_labels
+            # (This is a bit hacky, ideally we'd pass the model reference)
+            # For now, compute labels directly here
+
+            bg_scores = outputs['bg_scores']  # [B, num_queries]
+            pred_boxes = outputs['pred_boxes']  # [B, num_queries, 4]
+
+            # Generate supervision labels
+            device = bg_scores.device
+            B, num_queries = bg_scores.shape
+            labels = torch.full((B, num_queries), -1, dtype=torch.long, device=device)
+            weights = torch.zeros((B, num_queries), dtype=torch.float32, device=device)
+
+            for batch_idx in range(B):
+                # Positive samples: matched queries
+                pred_idx = indices[batch_idx][0]
+                labels[batch_idx, pred_idx] = 0  # Target
+                weights[batch_idx, pred_idx] = 1.0
+
+                # Negative samples: far from all GT (IoU < 0.3)
+                if len(targets[batch_idx]['boxes']) > 0:
+                    pred_boxes_xyxy = box_cxcywh_to_xyxy(pred_boxes[batch_idx])
+                    gt_boxes = targets[batch_idx]['boxes'].to(device)
+                    gt_boxes_xyxy = box_cxcywh_to_xyxy(gt_boxes)
+
+                    # IoU matrix
+                    iou_matrix = generalized_box_iou(pred_boxes_xyxy, gt_boxes_xyxy)
+                    iou_matrix = (iou_matrix + 1) / 2  # GIoU to IoU approx
+
+                    max_iou, _ = iou_matrix.max(dim=1)
+
+                    # Background: IoU < 0.3
+                    bg_mask = max_iou < 0.3
+                    labels[batch_idx, bg_mask] = 1
+                    weights[batch_idx, bg_mask] = 1.0
+
+                    # Ignore: 0.3 < IoU < 0.5
+                    ignore_mask = (max_iou >= 0.3) & (max_iou < 0.5)
+                    labels[batch_idx, ignore_mask] = -1
+                    weights[batch_idx, ignore_mask] = 0.0
+
+            # Compute SBR loss
+            sbr_loss_value = self.sbr_loss(bg_scores, labels, weights)
+            losses['loss_sbr'] = sbr_loss_value * self.weight_dict.get('loss_sbr', 1.0)
 
         # For debugging Objects365 pre-train.
         losses = {k:torch.nan_to_num(v, nan=0.0) for k, v in losses.items()}
