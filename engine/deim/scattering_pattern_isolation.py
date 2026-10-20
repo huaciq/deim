@@ -44,12 +44,15 @@ class LocalStatisticsExtractor(nn.Module):
         # Local pooling for statistics
         self.avg_pool = nn.AvgPool2d(kernel_size, stride=1, padding=kernel_size//2)
 
-        # Feature extraction after statistics
+        # Feature extraction after statistics (移除 BatchNorm，用 GroupNorm)
         self.stat_conv = nn.Sequential(
-            nn.Conv2d(channels * 2, channels, 1, bias=False),  # mean + variance
-            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels * 2, channels, 1, bias=False),
+            nn.GroupNorm(32, channels),  # 更稳定的归一化
             nn.SiLU(inplace=True)
         )
+
+        # 保守初始化
+        nn.init.xavier_uniform_(self.stat_conv[0].weight, gain=0.5)
 
     def forward(self, x):
         """
@@ -106,20 +109,25 @@ class ScatteringDecomposer(nn.Module):
     def __init__(self, in_channels, act='silu'):
         super().__init__()
 
-        # Analyze scattering characteristics
+        # Analyze scattering characteristics (移除 BatchNorm)
         self.analyzer = nn.Sequential(
             nn.Conv2d(in_channels, in_channels, 3, 1, 1, groups=in_channels, bias=False),
-            nn.BatchNorm2d(in_channels),
+            nn.GroupNorm(32, in_channels),
             get_activation(act),
             nn.Conv2d(in_channels, in_channels // 2, 1, bias=False),
-            nn.BatchNorm2d(in_channels // 2),
+            nn.GroupNorm(16, in_channels // 2),
             get_activation(act)
         )
 
         # Decompose into 3 scattering components
-        self.decompose = nn.Sequential(
-            nn.Conv2d(in_channels // 2, 3, 1, bias=True),  # 3 components
-        )
+        self.decompose = nn.Conv2d(in_channels // 2, 3, 1, bias=True)
+
+        # 保守初始化
+        for m in self.analyzer:
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight, gain=0.5)
+        nn.init.xavier_uniform_(self.decompose.weight, gain=0.5)
+        nn.init.zeros_(self.decompose.bias)
 
     def forward(self, x):
         """
@@ -190,26 +198,31 @@ class ScatteringPatternIsolation(nn.Module):
         self.register_buffer('clutter_prior', torch.tensor([0.2, 0.6, 0.2]))
 
         # === 4. Pattern-based feature gating ===
-        # Use scattering similarity to modulate features
+        # Use scattering similarity to modulate features (移除 BatchNorm)
         self.pattern_gate = nn.Sequential(
-            nn.Conv2d(channels + 3, channels, 1, bias=False),  # features + scatter_probs
-            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels + 3, channels, 1, bias=False),
+            nn.GroupNorm(32, channels),
             get_activation(act),
             nn.Conv2d(channels, channels, 3, 1, 1, groups=channels, bias=False),
-            nn.BatchNorm2d(channels),
+            nn.GroupNorm(32, channels),
             get_activation(act),
             nn.Conv2d(channels, channels, 1, bias=True),
-            nn.Sigmoid()  # Gate values in [0, 1]
+            nn.Sigmoid()
         )
 
-        # === 5. Fusion ===
+        # === 5. Fusion (移除 BatchNorm)===
         self.fusion = nn.Sequential(
             nn.Conv2d(channels, channels, 1, bias=False),
-            nn.BatchNorm2d(channels)
+            nn.GroupNorm(32, channels)
         )
 
         # Initialize fusion as residual (zero-init)
-        nn.init.zeros_(self.fusion[1].weight)
+        nn.init.zeros_(self.fusion[0].weight)
+
+        # 保守初始化所有卷积
+        for m in self.pattern_gate:
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight, gain=0.5)
 
         # Fixed fusion strength (不可学习，避免数值爆炸)
         # 训练过程中 learnable alpha 会逐渐增大导致特征溢出
