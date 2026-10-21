@@ -930,12 +930,11 @@ class DFINETransformer(nn.Module):
                     spatial_shapes
                 )
 
-                # Update output boxes
+                # Update output boxes (this participates in box regression loss)
                 out['pred_boxes'] = refined_boxes
 
-                # Store scale predictions for visualization/loss
-                if self.training:
-                    out['scale_probs'] = scale_probs
+                # Don't store scale_probs to avoid unused parameters error
+                # SAR learns through box regression loss only
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],
