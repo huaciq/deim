@@ -311,11 +311,18 @@ class ScaleAwareRefinement(nn.Module):
         scale_delta = self.refinement_head(pooled_feat)  # [B, Q, 2] for (w, h)
 
         # Apply refinement: only adjust w, h; keep cx, cy
-        refined_boxes = pred_boxes.clone()
-        refined_boxes[..., 2:4] = pred_boxes[..., 2:4] * (1 + scale_delta)
+        # Non-inplace operation to preserve gradient graph
+        cx_cy = pred_boxes[..., :2]  # [B, Q, 2]
+        wh = pred_boxes[..., 2:4]  # [B, Q, 2]
+
+        # Scale adjustment
+        wh_refined = wh * (1 + scale_delta)
 
         # Clamp to valid range
-        refined_boxes[..., 2:4] = torch.clamp(refined_boxes[..., 2:4], min=0.01, max=1.0)
+        wh_refined = torch.clamp(wh_refined, min=0.01, max=1.0)
+
+        # Concatenate back (non-inplace)
+        refined_boxes = torch.cat([cx_cy, wh_refined], dim=-1)
 
         return refined_boxes, scale_probs
 
