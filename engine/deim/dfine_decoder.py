@@ -899,7 +899,7 @@ class DFINETransformer(nn.Module):
                 out['pred_boxes'] = pred_boxes_brl + box_delta
 
         # Apply SAR (Scale-Aware Refinement) if enabled
-        if self.sar is not None:
+        if self.sar is not None and memory.dim() == 3:
             # Handle denoising
             if self.training and dn_meta is not None:
                 _, query_embeds_sar = torch.split(init_ref_contents, dn_meta['dn_num_split'], dim=1)
@@ -910,31 +910,29 @@ class DFINETransformer(nn.Module):
             if pred_boxes_sar.shape[-1] > 4:
                 pred_boxes_sar = pred_boxes_sar[..., :4]
 
-            # Need multi-scale features from memory
-            # Reconstruct multi-scale features from memory list
+            # memory is flattened: [B, sum(H*W), C] across all pyramid levels.
+            # Split it back into per-level feature maps using spatial_shapes.
+            B_sar, _, C_sar = memory.shape
             multi_scale_feats = []
-            for i, mem in enumerate(memory):
-                if mem.dim() == 3:  # [B, H*W, C]
-                    B = mem.shape[0]
-                    H, W = spatial_shapes[i].tolist()
-                    C = mem.shape[-1]
-                    feat = mem.permute(0, 2, 1).reshape(B, C, H, W)  # [B, C, H, W]
-                    multi_scale_feats.append(feat)
+            offset = 0
+            for H_lvl, W_lvl in spatial_shapes:
+                H_lvl, W_lvl = int(H_lvl), int(W_lvl)
+                numel = H_lvl * W_lvl
+                feat = memory[:, offset:offset + numel, :]  # [B, H*W, C]
+                feat = feat.permute(0, 2, 1).reshape(B_sar, C_sar, H_lvl, W_lvl).contiguous()
+                multi_scale_feats.append(feat)
+                offset += numel
 
             if len(multi_scale_feats) > 0:
-                # Apply scale-aware refinement
-                refined_boxes, scale_probs = self.sar(
+                # Scale-aware refinement; refined boxes flow into the box
+                # regression / GIoU losses, so all SAR params receive gradient.
+                refined_boxes, _ = self.sar(
                     query_embeds_sar,
                     pred_boxes_sar,
                     multi_scale_feats,
                     spatial_shapes
                 )
-
-                # Update output boxes (this participates in box regression loss)
                 out['pred_boxes'] = refined_boxes
-
-                # Don't store scale_probs to avoid unused parameters error
-                # SAR learns through box regression loss only
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],
