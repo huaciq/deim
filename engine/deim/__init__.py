@@ -23,3 +23,4 @@ from .adaptive_feature_selection import AdaptiveFeatureSelection, MultiScaleEnha
 from .scattering_pattern_isolation import ScatteringPatternIsolation, SPILoss
 from .background_rejection import SimpleBackgroundRejection, SBRLoss
 from .boundary_refinement import BoundaryRefinementLoss, BRLCriterion
+from .scale_aware_refinement import ScaleAwareRefinement, SARLoss

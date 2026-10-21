@@ -24,6 +24,7 @@ from .utils import bias_init_with_prob
 from .scatter_clutter_suppression import ScatterAwareClutterSuppression
 from .background_rejection import SimpleBackgroundRejection
 from .boundary_refinement import BoundaryRefinementLoss
+from .scale_aware_refinement import ScaleAwareRefinement
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -438,6 +439,9 @@ class DFINETransformer(nn.Module):
                  sbr_suppression_mode='multiplicative',
                  use_brl=False,
                  brl_use_boundary_attention=False,
+                 use_sar=False,
+                 sar_num_scales=3,
+                 sar_pooled_size=7,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -560,6 +564,17 @@ class DFINETransformer(nn.Module):
             )
         else:
             self.brl = None
+
+        # Optional Scale-Aware Refinement (SAR)
+        self.use_sar = use_sar
+        if use_sar:
+            self.sar = ScaleAwareRefinement(
+                hidden_dim=hidden_dim,
+                num_scales=sar_num_scales,
+                pooled_size=sar_pooled_size
+            )
+        else:
+            self.sar = None
 
         self._reset_parameters(feat_channels)
 
@@ -882,6 +897,45 @@ class DFINETransformer(nn.Module):
             # Optional: apply box refinement (if boundary attention enabled)
             if box_delta is not None:
                 out['pred_boxes'] = pred_boxes_brl + box_delta
+
+        # Apply SAR (Scale-Aware Refinement) if enabled
+        if self.sar is not None:
+            # Handle denoising
+            if self.training and dn_meta is not None:
+                _, query_embeds_sar = torch.split(init_ref_contents, dn_meta['dn_num_split'], dim=1)
+            else:
+                query_embeds_sar = init_ref_contents
+
+            pred_boxes_sar = out['pred_boxes']
+            if pred_boxes_sar.shape[-1] > 4:
+                pred_boxes_sar = pred_boxes_sar[..., :4]
+
+            # Need multi-scale features from memory
+            # Reconstruct multi-scale features from memory list
+            multi_scale_feats = []
+            for i, mem in enumerate(memory):
+                if mem.dim() == 3:  # [B, H*W, C]
+                    B = mem.shape[0]
+                    H, W = spatial_shapes[i].tolist()
+                    C = mem.shape[-1]
+                    feat = mem.permute(0, 2, 1).reshape(B, C, H, W)  # [B, C, H, W]
+                    multi_scale_feats.append(feat)
+
+            if len(multi_scale_feats) > 0:
+                # Apply scale-aware refinement
+                refined_boxes, scale_probs = self.sar(
+                    query_embeds_sar,
+                    pred_boxes_sar,
+                    multi_scale_feats,
+                    spatial_shapes
+                )
+
+                # Update output boxes
+                out['pred_boxes'] = refined_boxes
+
+                # Store scale predictions for visualization/loss
+                if self.training:
+                    out['scale_probs'] = scale_probs
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],

@@ -1,0 +1,22 @@
+__include__:
+  - './deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml'
+  - './paths_root.yml'
+
+# SAR (Scale-Aware Refinement) Configuration
+#
+# Addresses: 36.6% localization errors (scale estimation)
+# Expected: +0.8~1.2 AP, especially AP75 +1.5~2.0
+#
+# Core innovation:
+# - Adaptive multi-scale feature selection per box
+# - Physics-informed: small targets → stride-8, large → stride-32
+# - Refine box scale (w/h) while keeping center fixed
+
+DFINETransformer:
+  use_sar: True
+  sar_num_scales: 3  # stride 8, 16, 32
+  sar_pooled_size: 7  # RoI pooling output size
+
+# SAR is lightweight, no batch size reduction needed
+train_dataloader:
+  total_batch_size: 32
