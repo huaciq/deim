@@ -1,0 +1,19 @@
+# New Server Paths Configuration
+# 在新服务器上使用这个配置覆盖路径
+
+# Dataset paths
+train_dataloader:
+  dataset:
+    img_folder: /home/your_user/sar/datasets/OGSOD-1.0/sar
+    ann_file: /home/your_user/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/train.json
+
+val_dataloader:
+  dataset:
+    img_folder: /home/your_user/sar/datasets/OGSOD-1.0/sar
+    ann_file: /home/your_user/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/val.json
+
+# Output directory
+output_dir: /home/your_user/sar/experiments
+
+# Pretrain weight path (use -t flag instead)
+# Pretrain: /home/your_user/sar/pretrain/deim/deim_dfine_hgnetv2_s_coco_120e.pth

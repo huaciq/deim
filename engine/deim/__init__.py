@@ -22,3 +22,4 @@ from .detail_preservation import DetailPreservationModule
 from .adaptive_feature_selection import AdaptiveFeatureSelection, MultiScaleEnhancement
 from .scattering_pattern_isolation import ScatteringPatternIsolation, SPILoss
 from .background_rejection import SimpleBackgroundRejection, SBRLoss
+from .boundary_refinement import BoundaryRefinementLoss, BRLCriterion

@@ -23,6 +23,7 @@ from .utils import deformable_attention_core_func_v2, get_activation, inverse_si
 from .utils import bias_init_with_prob
 from .scatter_clutter_suppression import ScatterAwareClutterSuppression
 from .background_rejection import SimpleBackgroundRejection
+from .boundary_refinement import BoundaryRefinementLoss
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -435,6 +436,8 @@ class DFINETransformer(nn.Module):
                  use_sbr=False,
                  sbr_neg_iou_threshold=0.3,
                  sbr_suppression_mode='multiplicative',
+                 use_brl=False,
+                 brl_use_boundary_attention=False,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -546,6 +549,17 @@ class DFINETransformer(nn.Module):
             )
         else:
             self.sbr = None
+
+        # Optional Boundary Refinement Loss (BRL)
+        self.use_brl = use_brl
+        if use_brl:
+            self.brl = BoundaryRefinementLoss(
+                hidden_dim=hidden_dim,
+                use_boundary_attention=brl_use_boundary_attention,
+                iou_loss_weight=2.0
+            )
+        else:
+            self.brl = None
 
         self._reset_parameters(feat_channels)
 
@@ -846,6 +860,28 @@ class DFINETransformer(nn.Module):
 
             # Store background scores for loss computation
             out['bg_scores'] = bg_scores
+
+        # Apply BRL (Boundary Refinement Loss) if enabled
+        if self.brl is not None:
+            # Handle denoising
+            if self.training and dn_meta is not None:
+                _, query_embeds_brl = torch.split(init_ref_contents, dn_meta['dn_num_split'], dim=1)
+            else:
+                query_embeds_brl = init_ref_contents
+
+            pred_boxes_brl = out['pred_boxes']
+            if pred_boxes_brl.shape[-1] > 4:
+                pred_boxes_brl = pred_boxes_brl[..., :4]
+
+            # Predict IoU quality
+            pred_iou, box_delta = self.brl(query_embeds_brl, pred_boxes_brl, boundary_feat=None)
+
+            # Store for loss computation
+            out['pred_iou'] = pred_iou
+
+            # Optional: apply box refinement (if boundary attention enabled)
+            if box_delta is not None:
+                out['pred_boxes'] = pred_boxes_brl + box_delta
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],

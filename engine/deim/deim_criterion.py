@@ -18,6 +18,7 @@ from .dfine_utils import bbox2distance
 from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou, wasserstein_distance_normalized
 from .sar_boundary import generate_gt_boundary_map
 from .background_rejection import SBRLoss
+from .boundary_refinement import BRLCriterion
 from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
@@ -69,6 +70,9 @@ class DEIMCriterion(nn.Module):
 
         # SBR loss (optional)
         self.sbr_loss = SBRLoss(loss_weight=1.0, focal_alpha=0.25, focal_gamma=2.0)
+
+        # BRL criterion (optional)
+        self.brl_criterion = BRLCriterion(loss_weight=2.0)
 
     def loss_labels_focal(self, outputs, targets, indices, num_boxes):
         assert 'pred_logits' in outputs
@@ -522,6 +526,13 @@ class DEIMCriterion(nn.Module):
             # Compute SBR loss
             sbr_loss_value = self.sbr_loss(bg_scores, labels, weights)
             losses['loss_sbr'] = sbr_loss_value * self.weight_dict.get('loss_sbr', 1.0)
+
+        # Boundary Refinement Loss (BRL) auxiliary loss (training only)
+        if 'loss_brl' in self.weight_dict and 'pred_iou' in outputs:
+            brl_loss_dict = self.brl_criterion(outputs, targets, indices)
+            if brl_loss_dict:
+                brl_loss_dict = {k: v * self.weight_dict[k] for k, v in brl_loss_dict.items() if k in self.weight_dict}
+                losses.update(brl_loss_dict)
 
         # For debugging Objects365 pre-train.
         losses = {k:torch.nan_to_num(v, nan=0.0) for k, v in losses.items()}
