@@ -528,11 +528,11 @@ class DEIMCriterion(nn.Module):
             losses['loss_sbr'] = sbr_loss_value * self.weight_dict.get('loss_sbr', 1.0)
 
         # Boundary Refinement Loss (BRL) auxiliary loss (training only)
-        if 'loss_brl' in self.weight_dict and 'pred_iou' in outputs:
+        if 'pred_iou' in outputs:
             brl_loss_dict = self.brl_criterion(outputs, targets, indices)
-            if brl_loss_dict:
-                brl_loss_dict = {k: v * self.weight_dict[k] for k, v in brl_loss_dict.items() if k in self.weight_dict}
-                losses.update(brl_loss_dict)
+            # Only apply loss if the key exists in weight_dict
+            brl_loss_dict = {k: v * self.weight_dict[k] for k, v in brl_loss_dict.items() if k in self.weight_dict}
+            losses.update(brl_loss_dict)
 
         # For debugging Objects365 pre-train.
         losses = {k:torch.nan_to_num(v, nan=0.0) for k, v in losses.items()}

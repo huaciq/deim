@@ -24,7 +24,7 @@ DEIMCriterion:
     loss_fgl: 0.15
     loss_ddf: 1.5
     loss_mal: 1
-    loss_iou_pred: 2.0  # BRL IoU prediction loss
+    loss_iou_pred: 2.0  # BRL IoU prediction loss (must match BRLCriterion output key)
 
 # No batch size reduction needed (BRL is lightweight)
 train_dataloader:
