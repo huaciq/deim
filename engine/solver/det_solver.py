@@ -24,6 +24,9 @@ class DetSolver(BaseSolver):
     def fit(self, ):
         self.train()
         args = self.cfg
+        print(f'AMP enabled={args.use_amp}, '
+              f'dtype={args.yaml_cfg.get("amp_dtype", "float16")}, '
+              f'GradScaler enabled={self.scaler is not None and self.scaler.is_enabled()}')
 
         n_parameters, model_stats = stats(self.cfg)
         print(model_stats)
@@ -86,6 +89,7 @@ class DetSolver(BaseSolver):
                 print_freq=args.print_freq, 
                 ema=self.ema, 
                 scaler=self.scaler, 
+                amp_dtype=args.yaml_cfg.get('amp_dtype', 'float16'),
                 lr_warmup_scheduler=self.lr_warmup_scheduler,
                 writer=self.writer
             )

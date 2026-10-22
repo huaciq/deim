@@ -549,8 +549,8 @@ class DEIMCriterion(nn.Module):
             brl_loss_dict = {k: v * self.weight_dict[k] for k, v in brl_loss_dict.items() if k in self.weight_dict}
             losses.update(brl_loss_dict)
 
-        # For debugging Objects365 pre-train.
-        losses = {k:torch.nan_to_num(v, nan=0.0) for k, v in losses.items()}
+        # Keep numerical failures visible to the engine before backward.
+        # Replacing a NaN loss with zero does not repair its backward graph.
         return losses
 
     def get_loss_meta_info(self, loss, outputs, targets, indices):

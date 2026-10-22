@@ -1,0 +1,15 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_sar_root.yml']
+
+# SAR numerical repair: preserve the module, batch 28, optimizer, schedule,
+# data augmentation and evaluation protocol. Use BF16's wider exponent range
+# for the model forward; RoIAlign, scale fusion and losses use FP32 in code.
+# Separate config keeps the original FP16 experiment identifiable.
+use_amp: True
+amp_dtype: bfloat16
+scaler:
+  enabled: False  # BF16 does not need FP16 loss scaling; old scaler state is ignored.
+
+output_dir: /root/zxy/experiments/deim_dfine_s_ogsod_120e_1gpu_sar_bf16/seed0
+
+train_dataloader:
+  total_batch_size: 28

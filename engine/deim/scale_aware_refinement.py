@@ -101,7 +101,7 @@ class ScalePredictor(nn.Module):
         scale_logits = self.scale_predictor(fused)  # [B, Q, num_scales]
 
         # Softmax to get distribution
-        scale_probs = F.softmax(scale_logits, dim=-1)
+        scale_probs = F.softmax(scale_logits, dim=-1, dtype=torch.float32)
 
         return scale_probs
 
@@ -142,10 +142,10 @@ class AdaptiveScalePooling(nn.Module):
         num_scales = len(multi_scale_feats)
 
         # Convert boxes from cxcywh to xyxy (still normalized)
-        boxes_xyxy = self._cxcywh_to_xyxy(pred_boxes)  # [B, Q, 4]
+        boxes_xyxy = self._cxcywh_to_xyxy(pred_boxes.float())  # [B, Q, 4]
 
         # Pool from each scale
-        pooled_feats_per_scale = []
+        weighted_feat = None
 
         for scale_idx, feat in enumerate(multi_scale_feats):
             H, W = spatial_shapes[scale_idx]
@@ -161,18 +161,15 @@ class AdaptiveScalePooling(nn.Module):
             boxes_flat = boxes_denorm.reshape(-1, 4)
             rois = torch.cat([batch_indices[:, None].float(), boxes_flat], dim=1)  # [B*Q, 5]
 
-            # RoI pooling
-            pooled = self.roi_align(feat, rois)  # [B*Q, C, out_size, out_size]
-            pooled = pooled.reshape(B, num_queries, self.hidden_dim, self.output_size, self.output_size)
-
-            pooled_feats_per_scale.append(pooled)
-
-        # Stack all scales
-        pooled_feats = torch.stack(pooled_feats_per_scale, dim=2)  # [B, Q, num_scales, C, H, W]
-
-        # Adaptive weighting by scale_probs
-        scale_weights = scale_probs[:, :, :, None, None, None]  # [B, Q, num_scales, 1, 1, 1]
-        weighted_feat = (pooled_feats * scale_weights).sum(dim=2)  # [B, Q, C, H, W]
+            # RoIAlign needs FP32 inputs under BF16 AMP (including its CUDA
+            # backward accumulation). Accumulate the same weighted sum one
+            # level at a time, avoiding the large stacked tensor and product.
+            with torch.autocast(device_type=feat.device.type, enabled=False):
+                pooled = self.roi_align(feat.float(), rois.float())
+                pooled = pooled.reshape(B, num_queries, self.hidden_dim, self.output_size, self.output_size)
+                scale_weight = scale_probs[:, :, scale_idx, None, None, None].float()
+                weighted = pooled * scale_weight
+                weighted_feat = weighted if weighted_feat is None else weighted_feat + weighted
 
         return weighted_feat
 
@@ -243,12 +240,12 @@ class ScaleRefinementHead(nn.Module):
         feat = feat.flatten(1)  # [B*Q, C/2]
 
         # Predict scale adjustment
-        scale_delta = self.refinement_head(feat)  # [B*Q, 2]
-        scale_delta = scale_delta.reshape(B, Q, 2)
-
-        # Apply tanh to constrain adjustment range: [-0.3, +0.3]
-        # (i.e., box can shrink to 70% or grow to 130%)
-        scale_delta = torch.tanh(scale_delta) * 0.3
+        # The small final MLP and box adjustment stay in FP32. Convolutions
+        # above still use AMP; the architecture and adjustment range are unchanged.
+        with torch.autocast(device_type=feat.device.type, enabled=False):
+            scale_delta = self.refinement_head(feat.float()).reshape(B, Q, 2)
+            # Box can shrink to 70% or grow to 130%.
+            scale_delta = torch.tanh(scale_delta) * 0.3
 
         return scale_delta
 
@@ -312,8 +309,8 @@ class ScaleAwareRefinement(nn.Module):
 
         # Apply refinement: only adjust w, h; keep cx, cy
         # Non-inplace operation to preserve gradient graph
-        cx_cy = pred_boxes[..., :2]  # [B, Q, 2]
-        wh = pred_boxes[..., 2:4]  # [B, Q, 2]
+        cx_cy = pred_boxes[..., :2].float()  # [B, Q, 2]
+        wh = pred_boxes[..., 2:4].float()  # [B, Q, 2]
 
         # Scale adjustment
         wh_refined = wh * (1 + scale_delta)

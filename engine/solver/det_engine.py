@@ -7,7 +7,6 @@ Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 """
 
 
-import sys
 import math
 from typing import Iterable
 
@@ -19,6 +18,19 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from ..optim import ModelEMA, Warmup
 from ..data import CocoEvaluator
 from ..misc import MetricLogger, SmoothedValue, dist_utils
+
+
+def _to_float32(value):
+    """Convert AMP outputs for the criterion without detaching their gradients."""
+    if isinstance(value, torch.Tensor):
+        return value.float() if value.is_floating_point() else value
+    if isinstance(value, dict):
+        return {key: _to_float32(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_float32(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_to_float32(item) for item in value)
+    return value
 
 
 def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, criterion: torch.nn.Module,
@@ -36,6 +48,8 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
     ema :ModelEMA = kwargs.get('ema', None)
     scaler :GradScaler = kwargs.get('scaler', None)
     lr_warmup_scheduler :Warmup = kwargs.get('lr_warmup_scheduler', None)
+    amp_dtype = {'float16': torch.float16, 'bfloat16': torch.bfloat16}[
+        kwargs.get('amp_dtype', 'float16')]
 
     cur_iters = epoch * len(data_loader)
 
@@ -46,46 +60,49 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
         metas = dict(epoch=epoch, step=i, global_step=global_step, epoch_step=len(data_loader))
 
         if scaler is not None:
-            with torch.autocast(device_type=str(device), cache_enabled=True):
+            with torch.autocast(device_type=device.type, dtype=amp_dtype, cache_enabled=True):
                 outputs = model(samples, targets=targets)
-
-            if torch.isnan(outputs['pred_boxes']).any() or torch.isinf(outputs['pred_boxes']).any():
-                print(outputs['pred_boxes'])
-                state = model.state_dict()
-                new_state = {}
-                for key, value in model.state_dict().items():
-                    # Replace 'module' with 'model' in each key
-                    new_key = key.replace('module.', '')
-                    # Add the updated key-value pair to the state dictionary
-                    state[new_key] = value
-                new_state['model'] = state
-                dist_utils.save_on_master(new_state, "./NaN.pth")
-
-            with torch.autocast(device_type=str(device), enabled=False):
-                loss_dict = criterion(outputs, targets, **metas)
-
-            loss = sum(loss_dict.values())
-            scaler.scale(loss).backward()
-
-            if max_norm > 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
-
+            # Disabling autocast alone does not convert FP16/BF16 tensors.
+            # This includes auxiliary and denoising outputs used by FGL/DDF.
+            outputs = _to_float32(outputs)
         else:
             outputs = model(samples, targets=targets)
+
+        if not torch.isfinite(outputs['pred_boxes']).all():
+            image_ids = [target['image_id'].item() for target in targets]
+            raise FloatingPointError(
+                f'Non-finite pred_boxes before matching: epoch={epoch}, step={i}, '
+                f'amp_dtype={amp_dtype}, image_ids={image_ids}')
+
+        with torch.autocast(device_type=device.type, enabled=False):
             loss_dict = criterion(outputs, targets, **metas)
+        loss = sum(loss_dict.values())
 
-            loss : torch.Tensor = sum(loss_dict.values())
-            optimizer.zero_grad()
+        # Check the original losses before backward/optimizer/EMA, rather than
+        # after updating the training state. All ranks inspect reduced losses.
+        loss_dict_reduced = dist_utils.reduce_dict(loss_dict)
+        loss_value = sum(loss_dict_reduced.values())
+        if not math.isfinite(loss_value):
+            raise FloatingPointError(
+                f'Non-finite loss before backward: epoch={epoch}, step={i}, '
+                f'losses={loss_dict_reduced}')
+
+        optimizer.zero_grad()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            if max_norm > 0:
+                scaler.unscale_(optimizer)
+                # FP16 GradScaler handles overflow by skipping the update.
+                # BF16 uses a disabled scaler, so reject invalid gradients here.
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm,
+                    error_if_nonfinite=not scaler.is_enabled())
+            scaler.step(optimizer)
+            scaler.update()
+        else:
             loss.backward()
-
             if max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-
             optimizer.step()
 
         # ema
@@ -97,14 +114,6 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
         else:
             if lr_warmup_scheduler is not None:
                 lr_warmup_scheduler.step()
-
-        loss_dict_reduced = dist_utils.reduce_dict(loss_dict)
-        loss_value = sum(loss_dict_reduced.values())
-
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            print(loss_dict_reduced)
-            sys.exit(1)
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
