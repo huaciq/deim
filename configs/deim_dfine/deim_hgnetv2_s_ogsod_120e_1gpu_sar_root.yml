@@ -17,6 +17,6 @@ DFINETransformer:
   sar_num_scales: 3  # stride 8, 16, 32
   sar_pooled_size: 7  # RoI pooling output size
 
-# SAR is lightweight, no batch size reduction needed
+# SAR adds ~15-20% memory overhead due to RoI pooling
 train_dataloader:
-  total_batch_size: 32
+  total_batch_size: 24  # Original 32, reduced to 24 for SAR
