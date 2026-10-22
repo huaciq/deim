@@ -179,7 +179,11 @@ class BackgroundScorer(nn.Module):
             bg_scores: [B, num_queries] in [0, 1]
         """
         x = self.mlp(features)
-        bg_scores = self.score_head(x).squeeze(-1)  # [B, num_queries]
+        # FP16 sigmoid can round to 0/1, where probability-space BCE has
+        # non-finite backward gradients. Keep the final Linear + Sigmoid in
+        # FP32; casting scores after a half-precision sigmoid is too late.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            bg_scores = self.score_head(x.float()).squeeze(-1)  # [B, num_queries]
 
         return bg_scores
 
@@ -398,9 +402,10 @@ class SBRLoss(nn.Module):
             return bg_scores.sum() * 0.0
 
         # Get valid samples
-        bg_scores_valid = bg_scores[valid_mask]  # [N]
-        labels_valid = labels[valid_mask].to(bg_scores.dtype)  # Match dtype (FP16 in AMP)
-        weights_valid = weights[valid_mask]  # [N]
+        # BCE, focal modulation and reduction must stay in FP32 under AMP.
+        bg_scores_valid = bg_scores[valid_mask].float()  # [N]
+        labels_valid = labels[valid_mask].float()  # [N]
+        weights_valid = weights[valid_mask].float()  # [N]
 
         # === 1. Binary cross-entropy ===
         bce_loss = F.binary_cross_entropy(
