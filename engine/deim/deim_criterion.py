@@ -42,6 +42,9 @@ class DEIMCriterion(nn.Module):
         share_matched_indices=False,
         mal_alpha=None,
         use_uni_set=True,
+        sbr_neg_iou_threshold=0.3,
+        sbr_ignore_iou_threshold=0.5,
+        sbr_bg_label_metric='iou',
         ):
         """Create the criterion.
         Parameters:
@@ -67,6 +70,11 @@ class DEIMCriterion(nn.Module):
         self.num_pos, self.num_neg = None, None
         self.mal_alpha = mal_alpha
         self.use_uni_set = use_uni_set
+
+        # SBR background-label thresholds (must match the DFINETransformer values)
+        self.sbr_neg_iou_threshold = sbr_neg_iou_threshold
+        self.sbr_ignore_iou_threshold = sbr_ignore_iou_threshold
+        self.sbr_bg_label_metric = sbr_bg_label_metric
 
         # SBR loss (optional)
         self.sbr_loss = SBRLoss(loss_weight=1.0, focal_alpha=0.25, focal_gamma=2.0)
@@ -507,19 +515,26 @@ class DEIMCriterion(nn.Module):
                     gt_boxes = targets[batch_idx]['boxes'].to(device)
                     gt_boxes_xyxy = box_cxcywh_to_xyxy(gt_boxes)
 
-                    # IoU matrix
-                    iou_matrix = generalized_box_iou(pred_boxes_xyxy, gt_boxes_xyxy)
-                    iou_matrix = (iou_matrix + 1) / 2  # GIoU to IoU approx
+                    # IoU matrix. Default is plain IoU; 'giou' reproduces the
+                    # historical v1 labelling, where GIoU mapped by (g+1)/2 is
+                    # systematically low for tiny boxes and mislabels genuine
+                    # small targets as background.
+                    if self.sbr_bg_label_metric == 'giou':
+                        iou_matrix = generalized_box_iou(pred_boxes_xyxy, gt_boxes_xyxy)
+                        iou_matrix = (iou_matrix + 1) / 2  # GIoU to IoU approx
+                    else:
+                        iou_matrix, _ = box_iou(pred_boxes_xyxy, gt_boxes_xyxy)
 
                     max_iou, _ = iou_matrix.max(dim=1)
 
-                    # Background: IoU < 0.3
-                    bg_mask = max_iou < 0.3
+                    # Background: IoU below the configured negative threshold
+                    bg_mask = max_iou < self.sbr_neg_iou_threshold
                     labels[batch_idx, bg_mask] = 1
                     weights[batch_idx, bg_mask] = 1.0
 
-                    # Ignore: 0.3 < IoU < 0.5
-                    ignore_mask = (max_iou >= 0.3) & (max_iou < 0.5)
+                    # Ignore: between the negative and ignore thresholds
+                    ignore_mask = (max_iou >= self.sbr_neg_iou_threshold) & \
+                                  (max_iou < self.sbr_ignore_iou_threshold)
                     labels[batch_idx, ignore_mask] = -1
                     weights[batch_idx, ignore_mask] = 0.0
 

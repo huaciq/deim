@@ -27,7 +27,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
-from .box_ops import box_cxcywh_to_xyxy, generalized_box_iou
+from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou
 
 
 class BackgroundFeatureExtractor(nn.Module):
@@ -205,7 +205,10 @@ class SimpleBackgroundRejection(nn.Module):
 
     def __init__(self, hidden_dim=256, num_classes=3,
                  neg_iou_threshold=0.3, ignore_iou_threshold=0.5,
-                 suppression_mode='multiplicative'):
+                 suppression_mode='multiplicative',
+                 suppression_strength=0.8,
+                 apply_in_train=True,
+                 bg_label_metric='iou'):
         """
         Args:
             hidden_dim: dimension of query embeddings
@@ -213,6 +216,13 @@ class SimpleBackgroundRejection(nn.Module):
             neg_iou_threshold: IoU below this is considered background
             ignore_iou_threshold: IoU above this but unmatched is ignored
             suppression_mode: 'multiplicative' or 'additive'
+            suppression_strength: how strongly background queries are suppressed
+            apply_in_train: if True, suppression is applied during training too.
+                This mutates the logits that the Hungarian matcher sees, which
+                creates a feedback loop (suppress -> matching changes -> labels
+                change -> suppress again). Set to False for the decoupled
+                variant: train the background head purely as an auxiliary
+                objectness target, and only use it to re-rank at inference.
         """
         super().__init__()
 
@@ -221,6 +231,8 @@ class SimpleBackgroundRejection(nn.Module):
         self.neg_iou_threshold = neg_iou_threshold
         self.ignore_iou_threshold = ignore_iou_threshold
         self.suppression_mode = suppression_mode
+        self.apply_in_train = apply_in_train
+        self.bg_label_metric = bg_label_metric
 
         # === 1. Feature extractor ===
         self.feature_extractor = BackgroundFeatureExtractor(hidden_dim, num_classes)
@@ -231,9 +243,8 @@ class SimpleBackgroundRejection(nn.Module):
         # === 2. Background scorer ===
         self.scorer = BackgroundScorer(feat_dim, hidden_dims=[256, 128, 64])
 
-        # === 3. Learnable suppression strength ===
-        # Start conservative (0.5), allow network to adjust
-        self.register_buffer('suppression_strength', torch.tensor(0.8))
+        # === 3. Suppression strength ===
+        self.register_buffer('suppression_strength', torch.tensor(float(suppression_strength)))
 
     def forward(self, query_embed, ref_points, pred_boxes, pred_logits):
         """
@@ -321,8 +332,17 @@ class SimpleBackgroundRejection(nn.Module):
                 gt_boxes_xyxy = box_cxcywh_to_xyxy(gt_boxes)
 
                 # IoU matrix [Q, num_gt]
-                iou_matrix = generalized_box_iou(pred_boxes_xyxy, gt_boxes_xyxy)
-                iou_matrix = (iou_matrix + 1) / 2  # Convert GIoU [-1,1] to [0,1]
+                # Default is plain IoU. GIoU is kept only for reproducing the
+                # historical v1 runs: it is systematically negative for small
+                # boxes (a 1px shift on a 7x7 box already makes the enclosing
+                # rectangle much larger than the union), so mapping it with
+                # (g+1)/2 pushes genuine tiny-object queries below the
+                # background threshold and SBR suppresses true positives.
+                if self.bg_label_metric == 'giou':
+                    iou_matrix = generalized_box_iou(pred_boxes_xyxy, gt_boxes_xyxy)
+                    iou_matrix = (iou_matrix + 1) / 2  # GIoU [-1,1] -> [0,1]
+                else:
+                    iou_matrix, _ = box_iou(pred_boxes_xyxy, gt_boxes_xyxy)
 
                 # Max IoU for each query
                 max_iou, _ = iou_matrix.max(dim=1)  # [Q]

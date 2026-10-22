@@ -1,0 +1,20 @@
+__include__:
+  - './deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml'
+  - './paths_root.yml'
+
+# Baseline @ batch 28 on the new server (root@00dbfb80a08f).
+#
+# Purpose: measure the clean single-GPU baseline at the *unified* batch size 28
+# on the new machine, so that:
+#   baseline@28(new server, GPU0)  vs  baseline@32(old server) = 57.9
+# isolates the batch-size effect from the machine/version effect, and
+#   baseline@28(new server)  vs  SPI@28(old server) = 59.4
+# is the only cross-machine comparison left to make once both sides are at 28.
+#
+# Augmentation policy is inherited unchanged from noaug: Mosaic +
+# RandomPhotometricDistort only, removed at epoch 112, no-aug from 112.
+
+output_dir: /root/zxy/experiments/deim_dfine_s_ogsod_120e_1gpu_noaug_b28/seed0
+
+train_dataloader:
+  total_batch_size: 28

@@ -436,7 +436,11 @@ class DFINETransformer(nn.Module):
                  scas_num_clutter_types=3,
                  use_sbr=False,
                  sbr_neg_iou_threshold=0.3,
+                 sbr_ignore_iou_threshold=0.5,
                  sbr_suppression_mode='multiplicative',
+                 sbr_suppression_strength=0.8,
+                 sbr_apply_in_train=True,
+                 sbr_bg_label_metric='iou',
                  use_brl=False,
                  brl_use_boundary_attention=False,
                  use_sar=False,
@@ -549,7 +553,11 @@ class DFINETransformer(nn.Module):
                 hidden_dim=hidden_dim,
                 num_classes=num_classes,
                 neg_iou_threshold=sbr_neg_iou_threshold,
-                suppression_mode=sbr_suppression_mode
+                ignore_iou_threshold=sbr_ignore_iou_threshold,
+                suppression_mode=sbr_suppression_mode,
+                suppression_strength=sbr_suppression_strength,
+                apply_in_train=sbr_apply_in_train,
+                bg_label_metric=sbr_bg_label_metric
             )
         else:
             self.sbr = None
@@ -870,8 +878,15 @@ class DFINETransformer(nn.Module):
             # Compute background scores
             bg_scores = self.sbr(query_embeds, ref_points, pred_boxes, pred_logits)
 
-            # Apply suppression to logits
-            out['pred_logits'] = self.sbr.apply_suppression(pred_logits, bg_scores)
+            # Apply suppression to logits only when allowed.
+            # During training this rewrites the logits seen by the Hungarian
+            # matcher, which creates a feedback loop (suppress -> matching
+            # changes -> supervision labels change -> suppress again) and
+            # leaves aux layers unmatched. With apply_in_train=False the head
+            # is trained purely as an auxiliary objectness target and only
+            # used for re-ranking at inference.
+            if (not self.training) or self.sbr.apply_in_train:
+                out['pred_logits'] = self.sbr.apply_suppression(pred_logits, bg_scores)
 
             # Store background scores for loss computation
             out['bg_scores'] = bg_scores

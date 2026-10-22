@@ -1,0 +1,53 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# SBR-v2 (Simple Background Rejection, revised) — old server, old paths
+#
+# Motivation: v1 gave +0.7~0.9 AP alone but Recall -2.4%, and in combination
+# with SPI it dragged AP down (58.5 vs 59.4 for SPI alone). Three defects were
+# identified in the v1 implementation:
+#
+#  1. Background labels were built from generalized_box_iou mapped by (g+1)/2.
+#     For tiny SAR targets a small center shift already collapses GIoU, so
+#     genuine small objects were labelled background and suppressed. Fixed in
+#     code: both background_rejection.py and deim_criterion.py now use plain
+#     box_iou.
+#
+#  2. Suppression was applied to out['pred_logits'] during training, which is
+#     exactly the tensor the Hungarian matcher consumes. That creates a
+#     feedback loop (suppress -> matching changes -> labels change -> suppress
+#     again) and leaves aux layers unsuppressed and inconsistent with the main
+#     layer. sbr_apply_in_train: False now trains the head purely as an
+#     auxiliary objectness target; suppression is applied at inference only.
+#
+#  3. Thresholds were calibrated on the distorted (g+1)/2 scale. With true IoU
+#     they move to 0.5 / 0.7, and the suppression strength is softened.
+#
+# Expected: recover the Recall -2.4% and keep the background-FP gain.
+
+DFINETransformer:
+  use_sbr: True
+  sbr_neg_iou_threshold: 0.5      # true IoU < 0.5 -> background
+  sbr_ignore_iou_threshold: 0.7   # 0.5 <= IoU < 0.7 -> ignored
+  sbr_suppression_mode: 'multiplicative'
+  sbr_suppression_strength: 0.5   # v1 was 0.8 (too aggressive at inference)
+  sbr_apply_in_train: False       # train/infer decoupling (defect 2)
+
+DEIMCriterion:
+  # Must mirror the DFINETransformer thresholds: the SBR loss re-derives the
+  # background labels in the criterion, so a mismatch would train the head
+  # against a different definition than the one it is evaluated with.
+  sbr_neg_iou_threshold: 0.5
+  sbr_ignore_iou_threshold: 0.7
+  sbr_bg_label_metric: 'iou'
+  weight_dict:
+    loss_vfl: 1
+    loss_bbox: 5
+    loss_giou: 2
+    loss_fgl: 0.15
+    loss_ddf: 1.5
+    loss_mal: 1
+    loss_sbr: 0.3                 # v1 was 0.5; head is now auxiliary only
+
+# Unified protocol: batch 28 (2026-10-22)
+train_dataloader:
+  total_batch_size: 28

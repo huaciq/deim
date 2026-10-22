@@ -13,6 +13,13 @@ DFINETransformer:
   use_sbr: True
   sbr_neg_iou_threshold: 0.3
   sbr_suppression_mode: 'multiplicative'
+  # --- v1 reproduction settings (frozen 2026-10-22) ---
+  # This config corresponds to the reported 58.5 combination run. Code defaults
+  # are now v2 behaviour, so pin v1 semantics explicitly.
+  sbr_bg_label_metric: 'giou'
+  sbr_apply_in_train: True
+  sbr_suppression_strength: 0.8
+  sbr_ignore_iou_threshold: 0.5
 
 DEIMCriterion:
   weight_dict:
