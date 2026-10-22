@@ -24,6 +24,10 @@ __include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
 #
 # Expected: recover the Recall -2.4% and keep the background-FP gain.
 
+# Explicit output dir: the included noaug config points at the baseline run,
+# which must never be overwritten.
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_sbr_v2/seed0
+
 DFINETransformer:
   use_sbr: True
   sbr_neg_iou_threshold: 0.5      # true IoU < 0.5 -> background
