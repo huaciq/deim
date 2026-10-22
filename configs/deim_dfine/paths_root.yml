@@ -1,0 +1,17 @@
+# New server (root@00dbfb80a08f) path overrides.
+# Only used by configs with the `_root` suffix, so the old server
+# (lab317r940xa) is unaffected.
+#
+# Include this AFTER the base config to override dataset/output paths.
+
+train_dataloader:
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/OGSOD-1.0/sar
+    ann_file: /root/zxy/TCRA-SAR/datasets/OGSOD-1.0/sar/RTDETR_COCO/train.json
+
+val_dataloader:
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/OGSOD-1.0/sar
+    ann_file: /root/zxy/TCRA-SAR/datasets/OGSOD-1.0/sar/RTDETR_COCO/val.json
+
+output_dir: /root/zxy/experiments

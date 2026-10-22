@@ -19,6 +19,6 @@ __include__: ["./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml"]
 HybridEncoder:
   use_spi: True
 
-# Reduce batch size to avoid OOM (SPI adds moderate overhead)
+# Unified protocol: batch 28 (inherited default; explicit for clarity)
 train_dataloader:
-  total_batch_size: 28 # Original 32, reduced to 28 for safety
+  total_batch_size: 28

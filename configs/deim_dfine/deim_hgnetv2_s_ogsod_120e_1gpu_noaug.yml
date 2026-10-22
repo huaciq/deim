@@ -23,8 +23,9 @@ checkpoint_freq: 10
 print_freq: 50
 
 train_dataloader:
-  # Single GPU: batch 32 per GPU (global batch = 32)
-  total_batch_size: 32
+  # Unified protocol: global batch 28 per GPU (was 32).
+  # Changed 2026-10-22 so all servers/modules share one batch size.
+  total_batch_size: 28
   num_workers: 4
   dataset:
     img_folder: /data2/zxy/sar/datasets/OGSOD-1.0/sar

@@ -26,4 +26,4 @@ DEIMCriterion:
 
 # Reduce batch size (SPI + SBR combined overhead ~20%)
 train_dataloader:
-  total_batch_size: 24  # Original 32, reduced to 24 for both modules
+  total_batch_size: 28  # Unified protocol (2026-10-22)

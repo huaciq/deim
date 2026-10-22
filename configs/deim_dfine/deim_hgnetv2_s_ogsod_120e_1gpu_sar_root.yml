@@ -17,6 +17,8 @@ DFINETransformer:
   sar_num_scales: 3  # stride 8, 16, 32
   sar_pooled_size: 7  # RoI pooling output size
 
-# SAR adds ~15-20% memory overhead due to RoI pooling
+# Unified protocol: batch 28 (2026-10-22).
+# NOTE: SAR's RoIAlign is the heaviest module. It ran at 24 and OOMed at 32.
+# If 28 OOMs, fall back to 24 and record that deviation in the experiment dir.
 train_dataloader:
-  total_batch_size: 24  # Original 32, reduced to 24 for SAR
+  total_batch_size: 28

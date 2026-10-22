@@ -24,4 +24,4 @@ DEIMCriterion:
 
 # Reduce batch size to avoid OOM (SBR adds ~10% memory overhead)
 train_dataloader:
-  total_batch_size: 28  # Original 32, reduced to 28 for safety
+  total_batch_size: 28  # Unified protocol (2026-10-22)

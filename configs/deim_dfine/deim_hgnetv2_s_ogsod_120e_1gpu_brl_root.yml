@@ -26,6 +26,6 @@ DEIMCriterion:
     loss_mal: 1
     loss_iou_pred: 2.0  # BRL IoU prediction loss (must match BRLCriterion output key)
 
-# No batch size reduction needed (BRL is lightweight)
+# Unified protocol: batch 28 (2026-10-22)
 train_dataloader:
-  total_batch_size: 32
+  total_batch_size: 28
