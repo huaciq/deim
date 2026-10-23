@@ -33,6 +33,53 @@ def _to_float32(value):
     return value
 
 
+def _outputs_are_finite(outputs, device):
+    """Agree across ranks before replaying a forward that used collectives."""
+    checks = []
+
+    def collect(value):
+        if isinstance(value, torch.Tensor) and value.is_floating_point():
+            checks.append(torch.isfinite(value.detach()).all().to(device))
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+
+    collect(outputs)
+    finite = torch.stack(checks).all().to(torch.int32)
+    if dist_utils.is_dist_available_and_initialized():
+        torch.distributed.all_reduce(finite, op=torch.distributed.ReduceOp.MIN)
+    return bool(finite.item())
+
+
+def _snapshot_forward_state(model, device):
+    # Forward may update BN buffers and consume dropout/denoising random numbers.
+    buffers = [(value, value.detach().clone()) for value in model.buffers()]
+    cpu_rng = torch.get_rng_state()
+    cuda_rng = torch.cuda.get_rng_state(device) if device.type == 'cuda' else None
+    return buffers, cpu_rng, cuda_rng
+
+
+def _retry_forward_fp32(model, samples, targets, state, device, epoch, step, reason):
+    buffers, cpu_rng, cuda_rng = state
+    with torch.no_grad():
+        for value, saved_value in buffers:
+            value.copy_(saved_value)
+    torch.set_rng_state(cpu_rng)
+    if cuda_rng is not None:
+        torch.cuda.set_rng_state(cuda_rng, device)
+    image_ids = [target['image_id'].item() for target in targets]
+    print(f'AMP_FP32_RETRY epoch={epoch} step={step} reason={reason} '
+          f'image_ids={image_ids}; same batch, CPU saved activations')
+    # Only this exceptional batch uses FP32. Offload saved activations rather
+    # than changing batch size or splitting the batch (which would change BN).
+    with torch.autocast(device_type=device.type, enabled=False), \
+            torch.autograd.graph.save_on_cpu(pin_memory=True):
+        return model(samples, targets=targets)
+
+
 def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0, **kwargs):
@@ -50,6 +97,11 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
     lr_warmup_scheduler :Warmup = kwargs.get('lr_warmup_scheduler', None)
     amp_dtype = {'float16': torch.float16, 'bfloat16': torch.bfloat16}[
         kwargs.get('amp_dtype', 'float16')]
+    amp_loss_fp32 = kwargs.get('amp_loss_fp32', True)
+    amp_fp32_retry = kwargs.get('amp_fp32_retry', False)
+    if amp_fp32_retry and (scaler is None or not scaler.is_enabled()
+                           or amp_dtype != torch.float16):
+        raise ValueError('AMP FP32 replay requires FP16 AMP with GradScaler enabled')
 
     cur_iters = epoch * len(data_loader)
 
@@ -58,15 +110,27 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         global_step = epoch * len(data_loader) + i
         metas = dict(epoch=epoch, step=i, global_step=global_step, epoch_step=len(data_loader))
+        forward_state = _snapshot_forward_state(model, device) if amp_fp32_retry else None
+        retried_fp32 = False
 
         if scaler is not None:
             with torch.autocast(device_type=device.type, dtype=amp_dtype, cache_enabled=True):
                 outputs = model(samples, targets=targets)
             # Disabling autocast alone does not convert FP16/BF16 tensors.
             # This includes auxiliary and denoising outputs used by FGL/DDF.
-            outputs = _to_float32(outputs)
+            if amp_loss_fp32:
+                outputs = _to_float32(outputs)
         else:
             outputs = model(samples, targets=targets)
+
+        if amp_fp32_retry and not _outputs_are_finite(outputs, device):
+            del outputs  # Release the invalid graph before restoring BN buffers.
+            outputs = _retry_forward_fp32(
+                model, samples, targets, forward_state, device, epoch, i, 'nonfinite_output')
+            retried_fp32 = True
+            if not _outputs_are_finite(outputs, device):
+                raise FloatingPointError(
+                    f'FP32 replay still has non-finite outputs: epoch={epoch}, step={i}')
 
         if not torch.isfinite(outputs['pred_boxes']).all():
             image_ids = [target['image_id'].item() for target in targets]
@@ -82,12 +146,27 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
         # after updating the training state. All ranks inspect reduced losses.
         loss_dict_reduced = dist_utils.reduce_dict(loss_dict)
         loss_value = sum(loss_dict_reduced.values())
+        if not math.isfinite(loss_value) and amp_fp32_retry and not retried_fp32:
+            # Criterion caches are cleared by its forward. Release the old graph
+            # before restoring buffers that it may have saved for backward.
+            outputs = loss_dict = loss = loss_dict_reduced = loss_value = None
+            outputs = _retry_forward_fp32(
+                model, samples, targets, forward_state, device, epoch, i, 'nonfinite_loss')
+            retried_fp32 = True
+            if not _outputs_are_finite(outputs, device):
+                raise FloatingPointError(
+                    f'FP32 replay still has non-finite outputs: epoch={epoch}, step={i}')
+            with torch.autocast(device_type=device.type, enabled=False):
+                loss_dict = criterion(outputs, targets, **metas)
+            loss = sum(loss_dict.values())
+            loss_dict_reduced = dist_utils.reduce_dict(loss_dict)
+            loss_value = sum(loss_dict_reduced.values())
+
         if not math.isfinite(loss_value):
             raise FloatingPointError(
                 f'Non-finite loss before backward: epoch={epoch}, step={i}, '
                 f'losses={loss_dict_reduced}')
 
-        optimizer.zero_grad()
         if scaler is not None:
             scaler.scale(loss).backward()
             if max_norm > 0:
@@ -99,7 +178,9 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
                     error_if_nonfinite=not scaler.is_enabled())
             scaler.step(optimizer)
             scaler.update()
+            optimizer.zero_grad()
         else:
+            optimizer.zero_grad()
             loss.backward()
             if max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
@@ -116,6 +197,8 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
                 lr_warmup_scheduler.step()
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced)
+        if amp_fp32_retry:
+            metric_logger.update(fp32_retry_rate=float(retried_fp32))
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
         if writer and dist_utils.is_main_process() and global_step % 10 == 0:

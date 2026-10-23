@@ -26,7 +26,9 @@ class DetSolver(BaseSolver):
         args = self.cfg
         print(f'AMP enabled={args.use_amp}, '
               f'dtype={args.yaml_cfg.get("amp_dtype", "float16")}, '
-              f'GradScaler enabled={self.scaler is not None and self.scaler.is_enabled()}')
+              f'GradScaler enabled={self.scaler is not None and self.scaler.is_enabled()}, '
+              f'FP32 loss={args.yaml_cfg.get("amp_loss_fp32", True)}, '
+              f'FP32 retry={args.yaml_cfg.get("amp_fp32_retry", False)}')
 
         n_parameters, model_stats = stats(self.cfg)
         print(model_stats)
@@ -90,6 +92,8 @@ class DetSolver(BaseSolver):
                 ema=self.ema, 
                 scaler=self.scaler, 
                 amp_dtype=args.yaml_cfg.get('amp_dtype', 'float16'),
+                amp_loss_fp32=args.yaml_cfg.get('amp_loss_fp32', True),
+                amp_fp32_retry=args.yaml_cfg.get('amp_fp32_retry', False),
                 lr_warmup_scheduler=self.lr_warmup_scheduler,
                 writer=self.writer
             )

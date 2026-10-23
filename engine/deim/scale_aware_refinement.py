@@ -25,6 +25,8 @@ Advantages over standard multi-scale fusion:
 - Lightweight (single forward pass per scale)
 """
 
+from contextlib import nullcontext
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,11 +45,12 @@ class ScalePredictor(nn.Module):
     - Output: scale distribution [B, Q, num_scales]
     """
 
-    def __init__(self, hidden_dim=256, num_scales=3):
+    def __init__(self, hidden_dim=256, num_scales=3, fp32_ops=True):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.num_scales = num_scales
+        self.fp32_ops = fp32_ops
 
         # Box size encoder
         self.box_size_encoder = nn.Sequential(
@@ -101,7 +104,10 @@ class ScalePredictor(nn.Module):
         scale_logits = self.scale_predictor(fused)  # [B, Q, num_scales]
 
         # Softmax to get distribution
-        scale_probs = F.softmax(scale_logits, dim=-1, dtype=torch.float32)
+        if self.fp32_ops:
+            scale_probs = F.softmax(scale_logits, dim=-1, dtype=torch.float32)
+        else:
+            scale_probs = F.softmax(scale_logits, dim=-1)
 
         return scale_probs
 
@@ -114,11 +120,12 @@ class AdaptiveScalePooling(nn.Module):
     scale distribution to weight different scales.
     """
 
-    def __init__(self, hidden_dim=256, output_size=7):
+    def __init__(self, hidden_dim=256, output_size=7, fp32_ops=True):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.output_size = output_size
+        self.fp32_ops = fp32_ops
 
         # RoI pooling for each scale
         self.roi_align = RoIAlign(
@@ -142,10 +149,12 @@ class AdaptiveScalePooling(nn.Module):
         num_scales = len(multi_scale_feats)
 
         # Convert boxes from cxcywh to xyxy (still normalized)
-        boxes_xyxy = self._cxcywh_to_xyxy(pred_boxes.float())  # [B, Q, 4]
+        boxes_input = pred_boxes.float() if self.fp32_ops else pred_boxes
+        boxes_xyxy = self._cxcywh_to_xyxy(boxes_input)  # [B, Q, 4]
 
         # Pool from each scale
         weighted_feat = None
+        pooled_feats_per_scale = []
 
         for scale_idx, feat in enumerate(multi_scale_feats):
             H, W = spatial_shapes[scale_idx]
@@ -161,15 +170,24 @@ class AdaptiveScalePooling(nn.Module):
             boxes_flat = boxes_denorm.reshape(-1, 4)
             rois = torch.cat([batch_indices[:, None].float(), boxes_flat], dim=1)  # [B*Q, 5]
 
-            # RoIAlign needs FP32 inputs under BF16 AMP (including its CUDA
-            # backward accumulation). Accumulate the same weighted sum one
-            # level at a time, avoiding the large stacked tensor and product.
-            with torch.autocast(device_type=feat.device.type, enabled=False):
-                pooled = self.roi_align(feat.float(), rois.float())
+            if self.fp32_ops:
+                # Preserve the separately recorded BF16/FP32 experiment.
+                with torch.autocast(device_type=feat.device.type, enabled=False):
+                    pooled = self.roi_align(feat.float(), rois.float())
+                    pooled = pooled.reshape(B, num_queries, self.hidden_dim, self.output_size, self.output_size)
+                    scale_weight = scale_probs[:, :, scale_idx, None, None, None].float()
+                    weighted = pooled * scale_weight
+                    weighted_feat = weighted if weighted_feat is None else weighted_feat + weighted
+            else:
+                # Original SAR operations, dtypes and reduction order.
+                pooled = self.roi_align(feat, rois)
                 pooled = pooled.reshape(B, num_queries, self.hidden_dim, self.output_size, self.output_size)
-                scale_weight = scale_probs[:, :, scale_idx, None, None, None].float()
-                weighted = pooled * scale_weight
-                weighted_feat = weighted if weighted_feat is None else weighted_feat + weighted
+                pooled_feats_per_scale.append(pooled)
+
+        if not self.fp32_ops:
+            pooled_feats = torch.stack(pooled_feats_per_scale, dim=2)
+            scale_weights = scale_probs[:, :, :, None, None, None]
+            weighted_feat = (pooled_feats * scale_weights).sum(dim=2)
 
         return weighted_feat
 
@@ -190,11 +208,12 @@ class ScaleRefinementHead(nn.Module):
     Output: scale adjustment factors for width and height.
     """
 
-    def __init__(self, hidden_dim=256, pooled_size=7):
+    def __init__(self, hidden_dim=256, pooled_size=7, fp32_ops=True):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.pooled_size = pooled_size
+        self.fp32_ops = fp32_ops
 
         # Feature processing
         self.feat_conv = nn.Sequential(
@@ -239,12 +258,12 @@ class ScaleRefinementHead(nn.Module):
         feat = F.adaptive_avg_pool2d(feat, (1, 1))  # [B*Q, C/2, 1, 1]
         feat = feat.flatten(1)  # [B*Q, C/2]
 
-        # Predict scale adjustment
-        # The small final MLP and box adjustment stay in FP32. Convolutions
-        # above still use AMP; the architecture and adjustment range are unchanged.
-        with torch.autocast(device_type=feat.device.type, enabled=False):
-            scale_delta = self.refinement_head(feat.float()).reshape(B, Q, 2)
-            # Box can shrink to 70% or grow to 130%.
+        # Original AMP head unless the archived FP32 operation mode is selected.
+        head_context = (torch.autocast(device_type=feat.device.type, enabled=False)
+                        if self.fp32_ops else nullcontext())
+        with head_context:
+            head_input = feat.float() if self.fp32_ops else feat
+            scale_delta = self.refinement_head(head_input).reshape(B, Q, 2)
             scale_delta = torch.tanh(scale_delta) * 0.3
 
         return scale_delta
@@ -268,21 +287,23 @@ class ScaleAwareRefinement(nn.Module):
     def __init__(self,
                  hidden_dim=256,
                  num_scales=3,
-                 pooled_size=7):
+                 pooled_size=7,
+                 fp32_ops=True):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.num_scales = num_scales
         self.pooled_size = pooled_size
+        self.fp32_ops = fp32_ops
 
         # === 1. Scale predictor ===
-        self.scale_predictor = ScalePredictor(hidden_dim, num_scales)
+        self.scale_predictor = ScalePredictor(hidden_dim, num_scales, fp32_ops=fp32_ops)
 
         # === 2. Adaptive pooling ===
-        self.adaptive_pooling = AdaptiveScalePooling(hidden_dim, pooled_size)
+        self.adaptive_pooling = AdaptiveScalePooling(hidden_dim, pooled_size, fp32_ops=fp32_ops)
 
         # === 3. Refinement head ===
-        self.refinement_head = ScaleRefinementHead(hidden_dim, pooled_size)
+        self.refinement_head = ScaleRefinementHead(hidden_dim, pooled_size, fp32_ops=fp32_ops)
 
     def forward(self, query_embed, pred_boxes, multi_scale_feats, spatial_shapes):
         """
@@ -309,8 +330,9 @@ class ScaleAwareRefinement(nn.Module):
 
         # Apply refinement: only adjust w, h; keep cx, cy
         # Non-inplace operation to preserve gradient graph
-        cx_cy = pred_boxes[..., :2].float()  # [B, Q, 2]
-        wh = pred_boxes[..., 2:4].float()  # [B, Q, 2]
+        boxes_input = pred_boxes.float() if self.fp32_ops else pred_boxes
+        cx_cy = boxes_input[..., :2]  # [B, Q, 2]
+        wh = boxes_input[..., 2:4]  # [B, Q, 2]
 
         # Scale adjustment
         wh_refined = wh * (1 + scale_delta)

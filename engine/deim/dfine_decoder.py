@@ -446,6 +446,7 @@ class DFINETransformer(nn.Module):
                  use_sar=False,
                  sar_num_scales=3,
                  sar_pooled_size=7,
+                 sar_fp32_ops=True,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -579,7 +580,8 @@ class DFINETransformer(nn.Module):
             self.sar = ScaleAwareRefinement(
                 hidden_dim=hidden_dim,
                 num_scales=sar_num_scales,
-                pooled_size=sar_pooled_size
+                pooled_size=sar_pooled_size,
+                fp32_ops=sar_fp32_ops
             )
         else:
             self.sar = None

@@ -1,0 +1,20 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_sar_root.yml']
+
+# Restore the original SAR/FP16 arithmetic for every finite batch.
+# Only a non-finite forward/loss replays the SAME batch once in FP32,
+# restoring pre-forward BN buffers and torch RNG state. Saved activations
+# for that exceptional forward are offloaded to CPU to preserve batch 28.
+use_amp: True
+amp_dtype: float16
+amp_loss_fp32: False
+amp_fp32_retry: True
+scaler:
+  enabled: True
+
+DFINETransformer:
+  sar_fp32_ops: False
+
+output_dir: /root/zxy/experiments/deim_dfine_s_ogsod_120e_1gpu_sar_fp16_nanfix/seed0
+
+train_dataloader:
+  total_batch_size: 28
