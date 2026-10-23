@@ -1,0 +1,4 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+train_dataloader:
+  total_batch_size: 24
