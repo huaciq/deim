@@ -31,5 +31,7 @@ DEIMCriterion:
     loss_sbr: 0.5  # SBR loss weight
 
 # Reduce batch size to avoid OOM (SBR adds ~10% memory overhead)
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_sbr/seed0
+
 train_dataloader:
   total_batch_size: 28  # Unified protocol (2026-10-22)
