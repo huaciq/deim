@@ -64,13 +64,37 @@ def iou_1toN(box, boxes):
 
 
 def build_cfg(config_path, ann_file, img_folder):
+    """Write an override config next to the original.
+
+    __include__ paths are resolved relative to the file that contains them
+    (engine/core/yaml_utils.py:42), so a temp file in /tmp cannot find the
+    original's siblings. Keeping the override in the same directory leaves the
+    relative includes intact.
+    """
     with open(config_path, encoding='utf-8') as f:
         cfg = yaml.safe_load(f)
+
+    # __include__ is resolved relative to the file that holds it
+    # (engine/core/yaml_utils.py:42), and this override lives elsewhere.
+    # Rewrite the includes to absolute paths so they still resolve.
+    if '__include__' in cfg:
+        base_dir = os.path.dirname(os.path.abspath(config_path))
+        includes = cfg['__include__']
+        if isinstance(includes, str):
+            includes = [includes]
+        cfg['__include__'] = [
+            inc if os.path.isabs(inc) else os.path.join(base_dir, inc)
+            for inc in includes
+        ]
+
     cfg.setdefault('val_dataloader', {}).setdefault('dataset', {})
     cfg['val_dataloader']['dataset']['ann_file'] = ann_file
     cfg['val_dataloader']['dataset']['img_folder'] = img_folder
     cfg['val_dataloader']['total_batch_size'] = 8
     cfg['val_dataloader']['num_workers'] = 4
+    # Drop paths that would let this temporary config write anywhere.
+    cfg.pop('output_dir', None)
+    cfg.pop('summary_dir', None)
     tmp = os.path.join(tempfile.gettempdir(), 'bias_split_cfg.yml')
     with open(tmp, 'w', encoding='utf-8') as f:
         yaml.safe_dump(cfg, f, allow_unicode=True)
