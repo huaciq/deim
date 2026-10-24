@@ -1,0 +1,20 @@
+# Reinitialize from COCO for an independent, longer paired comparison.
+__include__: ['./deim_hgnetv2_s_sardet10pct_screen_40e.yml']
+
+output_dir: /root/zxy/experiments/deim_dfine_s_sardet10pct_confirm80e/seed0
+epoches: 80
+flat_epoch: 40
+no_aug_epoch: 8
+
+train_dataloader:
+  dataset:
+    transforms:
+      policy:
+        epoch: [4, 40, 72]
+  collate_fn:
+    mixup_epochs: [4, 40]
+    stop_epoch: 72
+
+val_dataloader:
+  dataset:
+    ann_file: /root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/val.json

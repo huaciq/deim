@@ -1,0 +1,49 @@
+# Six-class direction screening; paired baseline/method comparisons only.
+__include__: ['./deim_hgnetv2_s_coco.yml']
+
+output_dir: /root/zxy/experiments/deim_dfine_s_sardet10pct_screen40e/seed0
+seed: 0
+num_classes: 6
+remap_mscoco_category: False
+use_ema: True
+use_amp: True
+
+HGNetv2:
+  pretrained: False
+
+epoches: 40
+warmup_iter: 500
+flat_epoch: 20
+no_aug_epoch: 4
+checkpoint_freq: 10
+print_freq: 50
+
+train_dataloader:
+  total_batch_size: 28  # GLOBAL: 14 samples per GPU on two GPUs.
+  num_workers: 4
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/train
+    ann_file: /root/zxy/experiments/data_subsets/sardet100k_screen_v1/train.json
+    transforms:
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5], probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [640, 640]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        epoch: [2, 20, 36]
+        ops: ['Mosaic', 'RandomPhotometricDistort']
+  collate_fn:
+    mixup_epochs: [2, 20]
+    stop_epoch: 36
+
+val_dataloader:
+  total_batch_size: 32
+  num_workers: 4
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/val
+    ann_file: /root/zxy/experiments/data_subsets/sardet100k_screen_v1/val.json
