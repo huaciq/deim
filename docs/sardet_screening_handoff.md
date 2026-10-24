@@ -173,7 +173,9 @@ tensorboard --logdir "$OUT/summary" --host 0.0.0.0 --port 6006
 
 ## 选择 best 权重、完整验证及六类 AP
 
-按权重中记录的 epoch 对应的 AP 选择 best_stg1/best_stg2，不能只看文件名。
+对实际存在的 best_stg1/best_stg2 都在完整验证集上评估，再按实测 AP 选权重。
+当前 solver 会在最后阶段回载 stage1；检查点的 last_epoch 不一定等于训练日志中的
+循环 epoch，因此不能仅凭该字段反查日志来替代检查点评估。
 
 ```bash
 cd /root/zxy/deim
@@ -181,28 +183,27 @@ source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 OUT=/root/zxy/experiments/这里替换为实际实验目录
 export OUT
-CKPT=$(python - <<'PY'
-import json, os, pathlib, sys, torch
-p=pathlib.Path(os.environ['OUT'])
-rows={r['epoch']:r for s in (p/'log.txt').read_text().splitlines() if s.strip() for r in [json.loads(s)]}
-choices=[]
-for name in ['best_stg1.pth','best_stg2.pth']:
-    f=p/name
-    if f.is_file():
-        epoch=torch.load(f,map_location='cpu',weights_only=False)['last_epoch']
-        choices.append((rows[epoch]['test_coco_eval_bbox'][0],f))
-ap,f=max(choices,key=lambda x:x[0])
-print('selected',f,'AP',100*ap,file=sys.stderr)
-print(f)
-PY
-)
 CONFIG=$(cat "$OUT/config_path.txt")
 EVAL=$(mktemp -d "$OUT/fullval_XXXXXX")
-export EVAL
-nohup env CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py \
-  -c "$CONFIG" -r "$CKPT" --test-only --use-amp --output-dir "$EVAL" \
-  -u val_dataloader.dataset.ann_file=/root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/val.json \
-  > "$EVAL/console.log" 2>&1 < /dev/null &
+export OUT CONFIG EVAL
+cat > "$EVAL/evaluate_candidates.sh" <<'BASH'
+#!/usr/bin/env bash
+set -e
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
+conda activate deim_zxy
+for STAGE in best_stg1 best_stg2; do
+  CKPT="$OUT/$STAGE.pth"
+  if [ ! -f "$CKPT" ]; then continue; fi
+  mkdir "$EVAL/$STAGE"
+  printf 'Evaluating %s\n' "$CKPT"
+  env CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py \
+    -c "$CONFIG" -r "$CKPT" --test-only --use-amp --output-dir "$EVAL/$STAGE" \
+    -u val_dataloader.dataset.ann_file=/root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/val.json \
+    > "$EVAL/$STAGE/console.log" 2>&1
+done
+BASH
+nohup bash "$EVAL/evaluate_candidates.sh" > "$EVAL/console.log" 2>&1 < /dev/null &
 PID=$!
 printf '%s\n' "$PID" > "$EVAL/launcher.pid"
 disown "$PID"
@@ -210,17 +211,30 @@ printf 'EVAL=%s\n' "$EVAL"
 tail -f "$EVAL/console.log"
 ```
 
-完整验证完成后，读取本次对应 best 权重的六类 AP：
+完整验证完成后，读取两个候选的六类 AP，并保存实际 AP 最高的权重路径：
 
 ```bash
 export EVAL=/root/zxy/experiments/实际实验目录/fullval_实际后缀
 python - <<'PY'
-import os, pathlib, torch
-d=torch.load(pathlib.Path(os.environ['EVAL'])/'eval.pth',map_location='cpu',weights_only=False)
-for k,name in enumerate(['ship','aircraft','car','tank','bridge','harbor']):
-    values=d['precision'][:,:,k,0,-1]
-    valid=values[values>=0]
-    print(name,'AP',round(float(valid.mean())*100,3) if valid.size else 'N/A')
+import json, os, pathlib, torch
+p=pathlib.Path(os.environ['EVAL'])
+scores={}
+for stage in ['best_stg1','best_stg2']:
+    f=p/stage/'eval.pth'
+    if not f.is_file():
+        continue
+    precision=torch.load(f,map_location='cpu',weights_only=False)['precision']
+    values=precision[:,:,:,0,-1]
+    scores[stage]=float(values[values>=0].mean())*100
+    print(stage,'AP',round(scores[stage],3))
+    for k,name in enumerate(['ship','aircraft','car','tank','bridge','harbor']):
+        values=precision[:,:,k,0,-1]
+        valid=values[values>=0]
+        print(' ',name,'AP',round(float(valid.mean())*100,3) if valid.size else 'N/A')
+best=max(scores,key=scores.get)
+result={'full_val_AP':scores,'best_checkpoint':str(p.parent/(best+'.pth'))}
+(p/'checkpoint_selection.json').write_text(json.dumps(result,indent=2))
+print(result)
 PY
 ```
 
