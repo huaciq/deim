@@ -62,6 +62,12 @@ def _snapshot_forward_state(model, device):
     return buffers, cpu_rng, cuda_rng
 
 
+def _training_image_ids(targets):
+    """Keep source IDs grouped by sample, including Mosaic's four image IDs."""
+    return [target['image_id'].detach().reshape(-1).cpu().tolist()
+            for target in targets]
+
+
 def _retry_forward_fp32(model, samples, targets, state, device, epoch, step, reason):
     buffers, cpu_rng, cuda_rng = state
     with torch.no_grad():
@@ -70,7 +76,7 @@ def _retry_forward_fp32(model, samples, targets, state, device, epoch, step, rea
     torch.set_rng_state(cpu_rng)
     if cuda_rng is not None:
         torch.cuda.set_rng_state(cuda_rng, device)
-    image_ids = [target['image_id'].item() for target in targets]
+    image_ids = _training_image_ids(targets)
     print(f'AMP_FP32_RETRY epoch={epoch} step={step} reason={reason} '
           f'image_ids={image_ids}; same batch, CPU saved activations')
     # Only this exceptional batch uses FP32. Offload saved activations rather
@@ -133,7 +139,7 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
                     f'FP32 replay still has non-finite outputs: epoch={epoch}, step={i}')
 
         if not torch.isfinite(outputs['pred_boxes']).all():
-            image_ids = [target['image_id'].item() for target in targets]
+            image_ids = _training_image_ids(targets)
             raise FloatingPointError(
                 f'Non-finite pred_boxes before matching: epoch={epoch}, step={i}, '
                 f'amp_dtype={amp_dtype}, image_ids={image_ids}')

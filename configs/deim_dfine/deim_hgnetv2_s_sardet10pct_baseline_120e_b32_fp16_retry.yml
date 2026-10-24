@@ -1,0 +1,11 @@
+# Same subset, optimizer, augmentation, batch and schedule as the FP16 baseline.
+# A non-finite output/loss replays that same batch once in FP32 on both ranks.
+__include__: ['./deim_hgnetv2_s_sardet10pct_baseline_120e_b32.yml']
+
+output_dir: /root/zxy/experiments/deim_dfine_s_sardet10pct_baseline120e_b32_fp16_retry/seed0
+use_amp: True
+amp_dtype: float16
+amp_loss_fp32: True
+amp_fp32_retry: True
+scaler:
+  enabled: True
