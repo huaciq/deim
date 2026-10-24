@@ -1,0 +1,19 @@
+# Fixed six-class subset baseline requested by the user.
+# GPU 0,1: GLOBAL batch 32 = 16 per GPU; initialize with COCO weights via -t.
+__include__: ['./deim_hgnetv2_s_sardet10pct_screen_40e.yml']
+
+output_dir: /root/zxy/experiments/deim_dfine_s_sardet10pct_baseline120e_b32/seed0
+epoches: 120
+warmup_iter: 1000
+flat_epoch: 60
+no_aug_epoch: 8
+
+train_dataloader:
+  total_batch_size: 32
+  dataset:
+    transforms:
+      policy:
+        epoch: [4, 60, 112]
+  collate_fn:
+    mixup_epochs: [4, 60]
+    stop_epoch: 112
