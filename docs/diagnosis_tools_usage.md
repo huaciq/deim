@@ -328,3 +328,38 @@ A: 约 10~15 分钟（遍历验证集，计算所有 Query 和 GT 的 IoU）。
 ---
 
 **现在你可以开始跑诊断了！按步骤 1→2→3 依次执行，把结果发给我，我帮你分析具体问题。**
+
+## 定位上界诊断（localization_ceiling.py）
+
+用途：在写新模块之前，先量化 AP 的损失该归给哪一类原因，避免又一次凭直觉设计模块。
+同一组检测结果做四种受控替换，所有变体检测集不变，AP 差异只来自一个因素。
+
+| 变体 | 含义 | 对应可改进项 |
+|---|---|---|
+| `AP` | 原始检测 | 参考值 |
+| `AP_GTBOX` | 匹配上的框换成 GT 框 | **纯定位精度**的上界 |
+| `AP_TPFP` | 匹配上的保留，其余分数置 0 | **前后景分离**的上界 |
+| `AP_IQS` | 分数 × 真实 IoU | **分数排序质量**的上界 |
+| `AP_BOTH` | 两者都做 | 联合上界 |
+
+判读：
+- `AP_GTBOX - AP` 大 → 定位是瓶颈，做精修/高分辨率采样
+- `AP_TPFP - AP` 大 → 误检是瓶颈，做背景抑制
+- `AP_IQS - AP` 大 → 分数不反映框质量，做质量感知排序
+
+必须关掉 NMS 并把分数阈值放很低，否则检测集被裁剪，上界不成立。
+
+    RUN=/home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_noaug_b24/seed0
+    cd /home/zxy/sar/repos/deim
+
+    python tools/generate_predictions.py \
+      -c configs/deim_dfine/deim_hgnetv2_s_ogsod_120e_1gpu_noaug_b24.yml \
+      -r "$RUN/best_stg1.pth" \
+      -o predictions_b24.json \
+      --score-thr 0.001 --no-nms
+
+    python tools/localization_ceiling.py \
+      --gt /data2/zxy/sar/datasets/OGSOD-1.0/sar/RTDETR_COCO/val.json \
+      --dt predictions_b24.json \
+      --iou-thr 0.5 \
+      --output ceiling_b24.txt

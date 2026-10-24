@@ -76,8 +76,7 @@ def main(args):
                 scores_per_query, labels_per_query = scores.max(dim=-1)  # [num_queries]
 
                 # Apply score threshold
-                score_threshold = 0.3
-                keep = scores_per_query > score_threshold
+                keep = scores_per_query > args.score_thr
 
                 if keep.sum() == 0:
                     continue
@@ -98,21 +97,23 @@ def main(args):
 
                 # Apply NMS per class
                 from torchvision.ops import nms
-                nms_threshold = 0.5
 
-                keep_all = []
-                for class_id in labels_keep.unique():
-                    class_mask = labels_keep == class_id
-                    class_boxes = boxes_xyxy[class_mask]
-                    class_scores = scores_keep[class_mask]
+                if args.no_nms:
+                    keep_nms = torch.arange(len(labels_keep), device=labels_keep.device)
+                else:
+                    keep_all = []
+                    for class_id in labels_keep.unique():
+                        class_mask = labels_keep == class_id
+                        class_boxes = boxes_xyxy[class_mask]
+                        class_scores = scores_keep[class_mask]
 
-                    keep_class = nms(class_boxes, class_scores, nms_threshold)
-                    keep_all.append(torch.where(class_mask)[0][keep_class])
+                        keep_class = nms(class_boxes, class_scores, args.nms_thr)
+                        keep_all.append(torch.where(class_mask)[0][keep_class])
 
-                if len(keep_all) == 0:
-                    continue
+                    if len(keep_all) == 0:
+                        continue
 
-                keep_nms = torch.cat(keep_all)
+                    keep_nms = torch.cat(keep_all)
 
                 # Final boxes in xyxy pixel coordinates
                 boxes_final = boxes_xyxy[keep_nms]
@@ -155,6 +156,13 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--resume', type=str, required=True, help='Checkpoint path')
     parser.add_argument('-o', '--output', type=str, default='predictions.json', help='Output file')
     parser.add_argument('--seed', type=int, default=0, help='Random seed')
+    parser.add_argument('--score-thr', type=float, default=0.3,
+                        help='Score threshold. Use a very small value (e.g. 0.001) '
+                             'for ceiling analysis, which must see the full ranking.')
+    parser.add_argument('--nms-thr', type=float, default=0.5, help='NMS IoU threshold')
+    parser.add_argument('--no-nms', action='store_true',
+                        help='Skip NMS. COCOeval already applies its own greedy matching, '
+                             'so NMS only removes detections before it sees them.')
 
     args = parser.parse_args()
     main(args)
