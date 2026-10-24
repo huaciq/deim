@@ -162,13 +162,17 @@ def main():
         if not sel:
             continue
         a = np.array([[r['iou'], r['iou_c'], r['iou_s'], r['s'], r['t']] for r in sel])
-        gain_c = a[:, 1].mean() - a[:, 0].mean()
-        gain_s = a[:, 2].mean() - a[:, 0].mean()
+        # iou_c = GT size + predicted centre  -> what fixing the SIZE buys.
+        # iou_s = GT centre + predicted size   -> what fixing the CENTRE buys.
+        gain_size = a[:, 1].mean() - a[:, 0].mean()
+        gain_centre = a[:, 2].mean() - a[:, 0].mean()
         scale_bias = np.sqrt(a[:, 3] * a[:, 4]).mean() - 1.0
         aspect = (a[:, 3] / a[:, 4]).mean() - 1.0
-        verdict = 'size' if gain_c > 2 * gain_s else ('center' if gain_s > 2 * gain_c else 'both')
-        line = (f"{name:8s} n={len(sel):5d}  gain_if_center_fixed={gain_c:+.3f}  "
-                f"gain_if_size_fixed={gain_s:+.3f}  -> {verdict}"
+        verdict = ('CENTRE' if gain_centre > 2 * gain_size
+                   else 'SIZE' if gain_size > 2 * gain_centre
+                   else 'both')
+        line = (f"{name:8s} n={len(sel):5d}  gain_if_size_fixed={gain_size:+.3f}  "
+                f"gain_if_centre_fixed={gain_centre:+.3f}  -> {verdict}"
                 f"   scale_bias={scale_bias:+.3f}  aspect_bias={aspect:+.3f}")
         print(line)
         lines.append(line)
