@@ -1,0 +1,28 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# DPM (Detail Preservation Module) at the strict protocol batch of 24.
+#
+# Rationale: every module evaluated so far (SPI, SBR, BCM) re-weights existing
+# stride-8 features and produces a null result. DPM is the only implemented
+# module that injects a *new, finer resolution* (stride 4 -> stride 8) and it
+# has never been trained. AP50 0.924 vs AP75 0.580 says the bottleneck is edge
+# precision on ~11 px objects, which a stride-8 map cannot represent
+# (11 px spans 1.375 cells). This run tests that hypothesis directly.
+#
+# Fixed vs the first draft: p2_channels must be 64 for HGNetv2 B0
+# (stage1 out_channels). 96 is the B2 value and would fail in input_proj.
+#
+# Backbone returns [stride4, stride8, stride16, stride32]; the encoder keeps
+# strides 8/16/32 as its three levels and DPM fuses the stride-4 detail in.
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_dpm_b24/seed0
+
+HGNetv2:
+  return_idx: [0, 1, 2, 3]
+
+HybridEncoder:
+  use_detail_preservation: True
+  p2_channels: 64
+
+train_dataloader:
+  total_batch_size: 24

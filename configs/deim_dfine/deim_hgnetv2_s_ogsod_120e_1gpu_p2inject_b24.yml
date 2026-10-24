@@ -1,0 +1,21 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# Control for DPM: inject the stride-4 backbone stage into stride-8 with a plain
+# Haar downsample + 1x1 projection, zero-initialised, and nothing else.
+#
+# This exists so that a positive DPM result can be attributed to the detail
+# branch rather than merely to "the network can see stride-4 features at all".
+# p2_inject is constructed whenever p2_channels is set, independently of
+# use_detail_preservation, so this config isolates that path.
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_p2inject_b24/seed0
+
+HGNetv2:
+  return_idx: [0, 1, 2, 3]
+
+HybridEncoder:
+  use_detail_preservation: False
+  p2_channels: 64
+
+train_dataloader:
+  total_batch_size: 24
