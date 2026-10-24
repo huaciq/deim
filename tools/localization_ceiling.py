@@ -92,7 +92,7 @@ def main():
     print(f"loaded {len(dets)} detections from {args.dt}")
 
     gts_by_img = defaultdict(list)
-    for ann in coco_gt.datasets[0]['annotations']:
+    for ann in coco_gt.dataset['annotations']:
         gts_by_img[ann['image_id']].append(ann)
     dts_by_img = defaultdict(list)
     for d in dets:
