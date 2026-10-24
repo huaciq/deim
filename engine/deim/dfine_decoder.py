@@ -916,7 +916,14 @@ class DFINETransformer(nn.Module):
                 out['pred_boxes'] = pred_boxes_brl + box_delta
 
         # Apply SAR (Scale-Aware Refinement) if enabled
-        if self.sar is not None and memory.dim() == 3:
+        if self.sar is not None:
+            # Fail loudly instead of silently skipping the module. A silent skip
+            # trains an unrefined detector that looks entirely normal, which has
+            # already produced one uninterpretable result in this repository.
+            if memory.dim() != 3:
+                raise RuntimeError(
+                    f'SAR is enabled but memory has shape {tuple(memory.shape)}; '
+                    'expected the flattened [B, sum(H*W), C] layout.')
             # Handle denoising
             if self.training and dn_meta is not None:
                 _, query_embeds_sar = torch.split(init_ref_contents, dn_meta['dn_num_split'], dim=1)

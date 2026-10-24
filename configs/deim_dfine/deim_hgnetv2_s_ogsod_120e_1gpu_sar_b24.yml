@@ -1,0 +1,31 @@
+__include__: ['./deim_hgnetv2_s_ogsod_120e_1gpu_noaug.yml']
+
+# SAR (Scale-Aware Refinement) at the strict protocol batch of 24.
+#
+# Old-server paths are inherited from noaug.yml; this config deliberately does
+# NOT include paths_root.yml, because the run is on lab317r940xa.
+#
+# Numerical path: fp32_ops defaults to True, i.e. RoIAlign, softmax, the
+# refinement MLP and the wh reconstruction all run in FP32. That avoids the
+# FP16 NaN that interrupted the previous attempt and keeps the comparison
+# against baseline@24 free of an amp_loss_fp32 difference: all runs use
+# amp_loss_fp32=True (the default) and FP32 SAR internals.
+#
+# Known limitation, unchanged from the previous attempt: scale_probs is not
+# directly supervised (get_scale_supervision returns an all-ignore placeholder
+# and SARLoss is not wired into the criterion). The scale predictor therefore
+# learns only through the box-refinement gradient. This run measures whether
+# the refinement path helps at all; adding scale supervision is a follow-up.
+#
+# RoIAlign is the heaviest module here. It OOMed at batch 32 and was run at 24.
+
+output_dir: /home/zxy/sar/experiments/deim_dfine_s_ogsod_120e_1gpu_sar_b24/seed0
+
+DFINETransformer:
+  use_sar: True
+  sar_num_scales: 3
+  sar_pooled_size: 7
+  sar_fp32_ops: True
+
+train_dataloader:
+  total_batch_size: 24

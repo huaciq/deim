@@ -168,7 +168,12 @@ class AdaptiveScalePooling(nn.Module):
             # RoI format: [batch_idx, x1, y1, x2, y2]
             batch_indices = torch.arange(B, device=feat.device)[:, None].expand(B, num_queries).reshape(-1)
             boxes_flat = boxes_denorm.reshape(-1, 4)
-            rois = torch.cat([batch_indices[:, None].float(), boxes_flat], dim=1)  # [B*Q, 5]
+            # torch.cat promotes (fp32 index, fp16 boxes) to fp32, which then
+            # mismatches the fp16 feature map in RoIAlign. Build the rois in the
+            # dtype that the pooling path will actually use.
+            rois_dtype = torch.float32 if self.fp32_ops else feat.dtype
+            rois = torch.cat([batch_indices[:, None].to(rois_dtype), boxes_flat.to(rois_dtype)],
+                             dim=1)  # [B*Q, 5]
 
             if self.fp32_ops:
                 # Preserve the separately recorded BF16/FP32 experiment.
