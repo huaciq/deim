@@ -51,7 +51,8 @@ SARDet-100K 图像尺寸多样，该缺陷必然生效，不修会污染本次�
 只读 JSON，不需 GPU。
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 VAL_ANN=/root/zxy/experiments/data_subsets/sardet100k_screen_v1/val.json
 python - "$VAL_ANN" <<'PY'
@@ -113,7 +114,8 @@ postprocessor 的 `[W, H, W, H]` 对齐。
 先确定基线运行目录与最佳检查点。不要假定路径，从运行目录已保存的配置读取。
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop/seed0   # 改成实际目录
 ls "$RUN"
@@ -158,7 +160,8 @@ PY
 导出（口径与 OGSOD 诊断一致：低阈值、不 NMS）：
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop/seed0
 CKPT="$RUN/best_stg1.pth"
@@ -187,7 +190,8 @@ python tools/generate_predictions.py \
 停止并排查导出链路。
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop/seed0
 DIAG="$RUN/diagnosis"
@@ -210,7 +214,8 @@ head -20 "$DIAG/ceiling.txt"
 ## 第 4 步：偏移量测量
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop/seed0
 DIAG="$RUN/diagnosis"
@@ -247,7 +252,8 @@ cat "$DIAG/bias_locator.txt"
 因此**只跑一次即可，不要改脚本**。粗扫一次：
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop/seed0
 DIAG="$RUN/diagnosis"
@@ -272,7 +278,8 @@ cat "$DIAG/shift_coarse.txt"
 ## 第 6 步：定位到具体环节
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 python tools/pipeline_roundtrip_test.py | tee /tmp/roundtrip.txt
 ```
@@ -284,7 +291,8 @@ normalize cxcywh 往返、Mosaic 摆放。输出中任何 `**OFFSET**` 直接定
 此时再执行：
 
 ```bash
-cd /home/zxy/sar/repos/deim
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop/seed0
 DIAG="$RUN/diagnosis"
