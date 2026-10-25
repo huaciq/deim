@@ -28,12 +28,13 @@
 1. **只取均值。** `engine/deim/dfine_decoder.py:267-271` 的 `Integral.forward`：
    softmax 后直接 `F.linear(x, project)` 求期望，方差与形状全部丢弃。
 
-2. **唯一的分布形状使用者是 LQE，且当前近似恒等。**
+2. **LQE 使用分布峰值；零初始化只保证训练起点恒等。**
    `dfine_decoder.py:274-289`：只用 `prob.topk(4)` 的峰值与峰均值，不看方差；
    末尾 `init.constant_(...bias, 0)` / `init.constant_(...weight, 0)` 将输出层初始化为零，
-   因此训练起点上 LQE 是恒等映射，与代码注释 "Lqe does not affect the performance here" 一致。
+   因此训练起点上 LQE 是恒等映射。训练后是否近似恒等需要实测，不能从初始化推断；
+   本次检查点的 LQE 末层已非零，详见执行记录。
 
-3. **推理不输出分布。** `dfine_decoder.py:823-825`：eval 分支只输出
+3. **本诊断修改前，推理不输出分布。** `dfine_decoder.py:823-825`：eval 分支只输出
    `pred_logits` 与 `pred_boxes`；`pred_corners` 与 `ref_points` 仅在 training 分支输出。
 
 4. 参数：`reg_max=32`（33 个 bin），`up=0.5`，`reg_scale=4`，`num_layers=3`，`eval_idx=-1`。
@@ -96,7 +97,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
 import torch
-from pycocotools.coco import COCO
 from tqdm import tqdm
 
 from engine.core import YAMLConfig
@@ -116,7 +116,8 @@ def main(args):
     reg_max = int(model.decoder.reg_max)
     up = model.decoder.up.detach().float().cpu()
     reg_scale = float(model.decoder.reg_scale.detach().cpu())
-    project = weighting_function(reg_max, up, reg_scale).float().cpu()
+    # weighting_function concatenates 1-D tensors; preserve the parameter shape.
+    project = weighting_function(reg_max, up, model.decoder.reg_scale.detach().float().cpu()).float().cpu()
 
     out_img, out_qidx = [], []
     out_score, out_label = [], []
@@ -191,6 +192,8 @@ def main(args):
         project=project.numpy(),
         reg_scale=np.float64(reg_scale),
         reg_max=np.int64(reg_max),
+        recon_err=np.float64(recon_err),
+        n_images=np.int64(n_img),
     )
 
     print(f"images: {n_img}")
@@ -319,9 +322,12 @@ def main():
     ap.add_argument('--output', default=None)
     args = ap.parse_args()
 
-    z = np.load(args.npz)
+    # NpzFile does not cache arrays; read each compressed array only once.
+    with np.load(args.npz) as archive:
+        z = {key: archive[key] for key in archive.files}
     reg_scale = float(z['reg_scale'])
     reg_max = int(z['reg_max'])
+    project_min, project_max = float(z['project'].min()), float(z['project'].max())
     gt = json.load(open(args.gt))
 
     img = {im['id']: im for im in gt['images']}
@@ -374,8 +380,8 @@ def main():
                              g[2] / W_img, g[3] / H_img])
             d_pred = edge_dists(ref[None], box[None], reg_scale)[0]
             d_gt = edge_dists(ref[None], gbox[None], reg_scale)[0]
-            if (d_gt < 0).any() or (d_gt > reg_max - 0.1).any():
-                continue                            # target outside bin range
+            if (d_gt < project_min).any() or (d_gt > project_max).any():
+                continue                            # outside signed projection support, not index range
             W_gt.append(g[2])
             SIG.append(z['std'][k])
             ERR.append(d_pred - d_gt)
@@ -561,3 +567,279 @@ AP 数值不可信。`localization_ceiling` 只比较同一批检测在不同条
 风险留档：若第 3 项显示各向同性，第 1、2 部分的动机消失，此时应改为直接做第 3 部分，
 并把论文定位从"SAR 边缘物理"改为"标定过的定位质量排序"，新颖性会显著下降，
 需要重新评估是否值得投入。
+
+---
+
+## 执行记录：2026-10-25，指定的新协议 baseline
+
+### 基线、口径和改动
+
+本次严格使用用户指定运行，不复用上一份旧基线的方框/上限诊断：
+
+```text
+RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop_fd65535_seed0_20261025_153055_ufPH9L
+DIAG=$RUN/diagnosis_fdr_variance_20261025_214532_oDPpm4
+```
+
+- 已完成 120 个日志 epoch（0..119）。按 AP 选择 **best_stg2.pth、日志 epoch 119**，
+  AP=**43.061709**、AP50=72.827406、AP75=45.104258、APs=35.741615，
+  APm=51.015266、APl=44.951497。
+- stage1 最佳为 epoch 117，AP=43.001050，低于上述 stage2，因此未选 stage1。
+- 原训练：seed=0、GPU 0/1、global batch=32、基础/验证输入 640、120 轮、
+  AdamW 主 LR=4e-4/骨干 LR=2e-4、WD=1e-4、warmup=2000、flat=64、
+  no_aug=2，增强边界 [4,64,118]，Mosaic/MixUp 概率 0.5，关闭 ZoomOut/IoUCrop，
+  COCO 检测器初始化、EMA/AMP、原 FP32 loss/异常重算策略。
+- 原训练 revision=`3ef34ba`。本次唯一的模型侧改动是 eval 输出追加
+  pred_corners/ref_points/up/reg_scale；没有新增可训练参数，没有修改 logits/boxes
+  的计算、损失、调度或训练数据。本次未启动或恢复训练，未实现模块草案。
+- 新增 tools/export_corner_stats.py、tools/corner_signal_analysis.py，保留
+  generate_predictions.py 原链路不再修改。模型输出及矩计算代码 revision=`fdf07d2`，
+  导出投影形状修正=`c6cc9ac`，NPZ 一次加载优化=`2ee018f`。
+- 类别和标注使用的 ID 均为 [0,1,2,3,4,5]，remap_mscoco_category=False。
+  验证集 4,096 张；四边导出 score>0.05、每图最多 100 queries、FP32、GPU 0。
+  定位上限另用 GPU 1 导出 score>0.001、无 NMS 的预测。二者使用同一固定权重快照。
+
+本地 4 项定向回归通过：追加输出前后 logits/boxes 逐元素一致；非均匀投影矩正确；
+保留 1-D reg_scale 后生成 33 项投影；负投影目标没有被误剔除。
+服务器先完成输出/矩/负目标三项回归，随后完成真实数据的全部导出与分析。
+这些检查不代表新方法有效；本实验没有训练新方法。
+
+### 执行前校正的脚本问题
+
+上方初稿示例的以下问题已更正，实际执行以 tools/ 中的实现为准：
+
+1. **投影值不是 bin 索引。** bin 下标为 0..32，但本检查点的投影支撑是 **[-4,4]**。
+   edge_dists 返回的是连续、有符号的投影坐标，范围判断必须用 project.min/max。
+   原示例的 [0,reg_max−0.1] 会错误剔除本次 6,031 个有效匹配中的 **5,546 个（91.96%）**，
+   只剩 485 个，产生严重选择偏差。本报告全部使用修正后的样本。
+2. weighting_function 需要保留形状为 [1] 的 reg_scale 张量来拼接投影；提前转成
+   Python float 会产生零维张量拼接错误。初次导出因此退出，日志保留为
+   corner_export_attempt1.console.log；修正后完整重导出，没有使用失败结果。
+3. NPZ 压缩数组在分析前一次性载入，避免逐 query 反复解压。一次缓慢分析被中止后，
+   用同一份 NPZ 完整重跑；没有重新采样或改变统计公式。
+4. sigma 五分位区间使用互不重叠的区间，最后一区间含上界，避免分界值重复计数。
+
+另外，**训练后的 LQE 不是零初始化状态**：最终 decoder 层的 LQE 输出层权重
+L2=0.734930，bias 绝对值=0.216610。这里只确认参数已非零，未做关闭 LQE 的性能消融，
+不能声称其作用近似恒等，也不能声称方差携带的信号独立于已有 LQE。
+
+### 第 0 项：同源重建与样本数
+
+- reg_max=32（33 bins）、up=0.5、reg_scale=4，投影支撑 [-4,4]。
+- 导出 4,096 张图、**27,042** 条 query 记录。
+- **recon_err=2.384185791×10⁻⁷ < 1×10⁻⁴：通过。**
+  检查覆盖全部输出 queries，不只覆盖筛选后记录；均值经实际 distance2bbox 重建框。
+- 同类别、IoU≥0.5 匹配 7,820 对；排除距任一图像边界不足 0.02 的 1,788 对，
+  排除投影目标超出实际支撑的 1 对，最终保留 **6,031 对**。
+- sigma、误差单位均为连续投影坐标，不能解释为整数 bin 个数或源图像像素。
+
+### 第 1 项：逐边信号
+
+| 边 | n | corr(sigma, abs(error)) | mean sigma | mean abs(error) |
+| --- | ---: | ---: | ---: | ---: |
+| left | 6031 | 0.45056 | 0.20462 | 0.24386 |
+| top | 6031 | 0.41281 | 0.19691 | 0.23577 |
+| right | 6031 | 0.43678 | 0.20671 | 0.25770 |
+| bottom | 6031 | 0.42409 | 0.19887 | 0.24026 |
+
+四边相关性的中位数为 **0.430437 ≥ 0.30：通过**。
+方差确实与已匹配框的边误差相关，不能给出“方差信号不存在”的结论。
+
+### 第 2 项：分 GT 宽度的相关系数
+
+这里沿用方案的**源图 GT 宽度**分档，不是 COCO 按面积定义的 small/medium/large。
+
+| GT 宽度（源像素） | n | left | top | right | bottom | 四边中位数 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| <32 | 2879 | 0.40332 | 0.39025 | 0.38355 | 0.39943 | **0.394837** |
+| 32–96 | 2836 | 0.43346 | 0.36422 | 0.47644 | 0.43692 | 0.43519 |
+| 96–256 | 313 | 0.47044 | 0.52776 | 0.32813 | 0.52545 | 0.49795 |
+| ≥256 | 3 | 样本不足 | 样本不足 | 样本不足 | 样本不足 | 不作判断 |
+
+<32 档的四边相关系数均低于各自整体值，中位数 **0.394837 < 0.430437**，
+按预设第 2 项落入**终止**。这不否定小目标上仍有约 0.39 的信号，
+而是不支持“小目标信号强于整体”的预设动机。
+
+### 第 3 项：四边均值与各向异性
+
+| 指标 | 数值 |
+| --- | ---: |
+| mean sigma left | 0.204618 |
+| mean sigma top | 0.196911 |
+| mean sigma right | 0.206714 |
+| mean sigma bottom | 0.198874 |
+| L/R | **0.989864** |
+| T/B | **0.990127** |
+| max/min | **1.049783** |
+
+四边的整体均值接近，T/B 仅相差约 1%；max/min 未达到通过阈值 1.15，
+数值上略低于终止边界 1.05。**按预设第 3 项为终止**，不能把四舍五入后的 1.050
+当成越过阈值。该边界不是统计显著性检验；更明确的事实是缺乏方案要求的较强
+整体逐边均值差异，不能据此建立“SAR 上下边物理不确定性不同”的论断。
+此结果也不等于证明每个单独目标的四边 sigma 完全相同。
+
+### 第 4 项：五分位校准表
+
+每条边按自身 sigma 分位，Q1..Q4 各 1,206 对，Q5 为 1,207 对。
+下表为该分位内 mean abs(error)，单位为投影坐标。
+
+| 边 | Q1（最低 sigma） | Q2 | Q3 | Q4 | Q5（最高 sigma） | 单调上升 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| left | 0.104466 | 0.154908 | 0.216130 | 0.294197 | 0.449435 | 是 |
+| top | 0.100534 | 0.165008 | 0.221491 | 0.277861 | 0.413804 | 是 |
+| right | 0.112446 | 0.163181 | 0.229114 | 0.324024 | 0.459579 | 是 |
+| bottom | 0.093285 | 0.157174 | 0.219708 | 0.293812 | 0.437145 | 是 |
+
+**第 4 项通过**。全部分位的 sigma 边界、计数另保存在 corner_signal.txt/json。
+计算后续项目是为完成本次诊断交付，没有因第 2 项失败而进入模块开发。
+
+补充标量相关性仅限当前匹配样本：mean(sigma) 与 IoU 的相关系数为 **−0.58313**，
+与分类置信度的相关系数为 **−0.81130**。后者说明它与已有分数强相关，
+尚未证明具有超出现有分类分数/LQE 的独立排序信息；未将这些相关性当作 AP 收益。
+
+### 第 5 项：同一新基线的定位上限
+
+使用同一 best_stg2 权重、同一 4,096 张验证图、score>0.001、无 NMS。
+导出坐标已使用修正后的 W/H 约定。
+
+日志 AP=43.061709，导出重算 AP≈43.18，差约 **+0.11829 AP**，通过 0.2 的锚点容差。
+差异口径与之前一致：导出器按每 query 类别最大分取框，训练后处理对 query×class
+展平后取 top-300；保留原导出逻辑。下表只以同一导出检测集合的 AP=43.18 为参照，
+不替换原 baseline 的 43.061709。
+
+| variant | AP | AP50 | AP75 | APs | 相对导出 AP |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AP | 43.18 | 72.93 | 45.26 | 35.78 | 0 |
+| AP_GTBOX | 72.93 | 72.93 | 72.93 | 67.25 | +29.75 |
+| AP_TPFP | 47.84 | 87.95 | 47.39 | 39.86 | +4.66 |
+| AP_IQS | 51.20 | 81.98 | 54.20 | 43.09 | **+8.02** |
+| AP_BOTH | 87.95 | 87.95 | 87.95 | 80.86 | +44.77 |
+
+**AP_IQS−AP=8.02≥3.0，第 5 项通过。** 这是已知 GT 的 oracle 诊断空间，
+不等于 FDR 方差模块能获得 8.02 AP，几项增量也不能相加。
+
+### 按预设标准的结论
+
+| 项目 | 判定 |
+| --- | --- |
+| 0：分布/框同源重建 | 通过 |
+| 1：四边相关性中位数≥0.30 | 通过，0.430437 |
+| 2：小目标信号强于整体 | **终止，0.394837 更低；最先失败项** |
+| 3：边间整体均值各向异性 | **终止，max/min=1.049783，T/B≈0.9901** |
+| 4：分位校准单调 | 通过，四边均单调 |
+| 5：排序 oracle 空间≥3 AP | 通过，+8.02 AP |
+
+**结论：按本方案规则终止当前逐边各向异性/小目标强化模块路线，不进入模块设计或训练。**
+终止依据首先是第 2 项，并有第 3 项不通过。方差与定位误差之间的关系本身成立，
+所以“全部方差信息无用”不是本次结论。若以后改做一般定位质量排序，需要另行验证
+相对现有 score/LQE 的独立价值；本任务未启动这个新方向，也未实现末尾模块草案。
+所有要求的诊断均已执行；仅 ≥256px 档相关系数因 n=3 未作推断。
+
+### 产物、复现与服务器交接
+
+大体积预测、权重快照和日志仅存放在上述 DIAG，没有提交 Git。
+corners.npz、corners.metadata.json、corner_signal.txt/json、ceiling.txt、anchor.json、
+diagnosis_metadata.json 和本次执行脚本保留完整证据；本地小型副本在：
+`C:/Users/DELL/.codex/artifacts/fdr_variance_step0_20261025/`。
+首次投影类型错误及 NPZ 性能修正前的中间记录也保留，最终完成状态单独汇总。
+
+正常服务器 Git 更新及环境激活（本次实际使用 Git bundle fetch + --ff-only merge 同步）：
+
+```bash
+cd /root/zxy/deim
+git status --short --branch
+git fetch origin
+git switch main
+git pull --ff-only origin main
+source /opt/miniconda3/etc/profile.d/conda.sh
+conda activate deim_zxy
+ulimit -Sn 65535
+RUN=/root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop_fd65535_seed0_20261025_153055_ufPH9L
+DIAG="$RUN/diagnosis_fdr_variance_20261025_214532_oDPpm4"
+```
+
+复现时创建新目录，保留本次产物；只运行推理与 CPU 分析，不训练：
+
+```bash
+REPRO=$(mktemp -d "$RUN/fdr_step0_reproduce_XXXXXX")
+CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=4 python tools/export_corner_stats.py \
+  -c "$DIAG/source_resolved_config.yml" -r "$DIAG/checkpoint_best_stg2.pth" \
+  -o "$REPRO/corners.npz" --score-thr 0.05 --topk 100 --seed 0
+python tools/corner_signal_analysis.py \
+  --npz "$REPRO/corners.npz" \
+  --gt /root/zxy/experiments/data_subsets/sardet100k_screen_v1/val.json \
+  --iou-thr 0.5 --border 0.02 --output "$REPRO/corner_signal.txt"
+coco_run() {
+  local SCRIPT="$1"
+  shift
+  python -c "import faster_coco_eval; faster_coco_eval.init_as_pycocotools(); import runpy,sys; script=sys.argv.pop(1); runpy.run_path(script,run_name='__main__')" "$SCRIPT" "$@"
+}
+export CUDA_VISIBLE_DEVICES=1
+coco_run tools/generate_predictions.py \
+  -c "$DIAG/source_resolved_config.yml" -r "$DIAG/checkpoint_best_stg2.pth" \
+  -o "$REPRO/pred.json" --score-thr 0.001 --no-nms --seed 0
+coco_run tools/localization_ceiling.py \
+  --gt "$REPRO/pred_gt.json" --dt "$REPRO/pred.json" \
+  --iou-thr 0.5 --output "$REPRO/ceiling.txt"
+```
+
+监控与读取本次诊断：
+
+```bash
+tail -n 8 "$DIAG/corner_export.console.log"
+cat "$DIAG/corner_signal.txt"
+cat "$DIAG/ceiling.txt"
+cat "$DIAG/anchor.json"
+cat "$DIAG/final_status.json"
+watch -n 2 nvidia-smi
+```
+
+以下仅交付原 baseline 的训练/恢复命令，本任务未执行。完整冻结配置、指标和
+TensorBoard 交接另见 [固定协议](sardet_paper120_nozoom_nocrop.md)。从 COCO 重新训练必须
+使用新目录，不能覆盖已完成基线：
+
+```bash
+OUT=$(mktemp -d /root/zxy/experiments/deim_s_sardet_paper120_reproduce_XXXXXX)
+export RUN OUT
+python - <<'PY'
+import os,pathlib,yaml
+p=pathlib.Path(os.environ['OUT'])
+c=yaml.safe_load((pathlib.Path(os.environ['RUN'])/'resolved_config.yml').read_text())
+c.update(output_dir=str(p),summary_dir=str(p/'summary'))
+(p/'resolved_config.yml').write_text(yaml.safe_dump(c,sort_keys=False))
+PY
+git rev-parse HEAD > "$OUT/git_revision.txt"
+ulimit -Sn 65535
+nohup env CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py \
+  -c "$OUT/resolved_config.yml" -t /root/zxy/pretrain/deim/deim_dfine_hgnetv2_s_coco_120e.pth \
+  --seed 0 --use-amp --output-dir "$OUT" \
+  > "$OUT/console.log" 2>&1 < /dev/null &
+PID=$!
+printf '%s\n' "$PID" > "$OUT/launcher.pid"
+disown "$PID"
+```
+
+恢复只针对已停止的独立运行，明确设置 OUT，不对上述完成的 baseline 执行：
+
+```bash
+OUT=/root/zxy/experiments/替换为需要恢复的独立运行
+LOG="$OUT/resume_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S).console.log"
+ulimit -Sn 65535
+nohup env CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py \
+  -c "$OUT/resolved_config.yml" -r "$OUT/last.pth" --seed 0 --use-amp --output-dir "$OUT" \
+  > "$LOG" 2>&1 < /dev/null &
+PID=$!
+printf '%s\n' "$PID" > "$OUT/launcher.pid"
+disown "$PID"
+tail -f "$LOG"
+```
+
+当前 solver 的 last.pth 仅在 epoch<118 更新，正常最后为 epoch 117，不是最终权重。
+最佳检查点仍按实测 AP 选择。原 baseline 的日志、指标与 TensorBoard：
+
+```bash
+OUT="$RUN"
+tail -n 8 "$OUT/console.log"
+tail -n 3 "$OUT/log.txt"
+tensorboard --logdir "$OUT/summary" --host 0.0.0.0 --port 6006
+```
