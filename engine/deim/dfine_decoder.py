@@ -824,7 +824,10 @@ class DFINETransformer(nn.Module):
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1], 'pred_corners': out_corners[-1],
                    'ref_points': out_refs[-1], 'up': self.up, 'reg_scale': self.reg_scale}
         else:
-            out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1]}
+            # Diagnosis only: expose the distribution and its decoding reference.
+            out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1],
+                   'pred_corners': out_corners[-1], 'ref_points': out_refs[-1],
+                   'up': self.up, 'reg_scale': self.reg_scale}
 
         # Apply SCAS (Scatter-Aware Clutter Suppression) if enabled
         if self.scas is not None:
