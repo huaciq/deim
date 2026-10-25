@@ -69,7 +69,7 @@ def main(args):
 
             for i in range(batch_size):
                 image_id = targets[i]['image_id'].item()
-                orig_size = targets[i]['orig_size']  # [H, W]
+                orig_size = targets[i]['orig_size']  # [W, H], as in PostProcessor.
 
                 # Get scores and labels for this image
                 scores = pred_logits[i].sigmoid()  # [num_queries, num_classes]
@@ -89,10 +89,10 @@ def main(args):
                 # Convert cxcywh normalized to xyxy pixel coordinates
                 cx, cy, w, h = boxes_keep.unbind(-1)
                 boxes_xyxy = torch.stack([
-                    (cx - 0.5 * w) * orig_size[1],
-                    (cy - 0.5 * h) * orig_size[0],
-                    (cx + 0.5 * w) * orig_size[1],
-                    (cy + 0.5 * h) * orig_size[0]
+                    (cx - 0.5 * w) * orig_size[0],
+                    (cy - 0.5 * h) * orig_size[1],
+                    (cx + 0.5 * w) * orig_size[0],
+                    (cy + 0.5 * h) * orig_size[1]
                 ], dim=-1)
 
                 # Apply NMS per class
