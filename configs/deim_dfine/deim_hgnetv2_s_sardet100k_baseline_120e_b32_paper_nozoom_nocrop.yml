@@ -1,0 +1,13 @@
+# Full SARDet-100K baseline. Keep the fixed screening protocol unchanged;
+# only switch both annotation files to the official full train/val splits.
+__include__: ['./deim_hgnetv2_s_sardet10pct_baseline_120e_b32_paper_nozoom_nocrop.yml']
+
+output_dir: /root/zxy/experiments/deim_s_sardet100k_paper120_b32_nozoom_nocrop/seed0
+
+train_dataloader:
+  dataset:
+    ann_file: /root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/train.json
+
+val_dataloader:
+  dataset:
+    ann_file: /root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/val.json
