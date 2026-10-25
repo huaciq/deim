@@ -1,0 +1,62 @@
+# Fixed SARDet screening protocol. See docs/sardet_paper120_nozoom_nocrop.md.
+# Inherit the official S recipe directly, not the earlier 40/80/120e recipes.
+__include__: ['./deim_hgnetv2_s_coco.yml']
+
+output_dir: /root/zxy/experiments/deim_s_sardet10pct_paper120_b32_nozoom_nocrop/seed0
+seed: 0
+num_classes: 6
+remap_mscoco_category: False
+
+# The full detector is initialized with train.py -t <COCO checkpoint>.
+HGNetv2:
+  pretrained: False
+
+# Paper text: nominal 120 epochs, last two epochs without strong augmentation.
+# Public S YAML instead extends training to 132 epochs for EMA exploration.
+# Keep its S dense/flat boundary (4 + 120/2 = 64), use a two-epoch tail.
+epoches: 120
+lrsheduler: flatcosine
+lr_gamma: 0.5
+warmup_iter: 2000
+flat_epoch: 64
+no_aug_epoch: 2
+
+use_ema: True
+use_amp: True
+# Retain the previously introduced numerical exception handling, documented
+# separately from the paper hyperparameters. Normal batches still use FP16.
+amp_dtype: float16
+amp_loss_fp32: True
+amp_fp32_retry: True
+scaler:
+  enabled: True
+
+train_dataloader:
+  total_batch_size: 32  # GLOBAL: 16 per GPU on GPUs 0 and 1.
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/train
+    ann_file: /root/zxy/experiments/data_subsets/sardet100k_screen_v1/train.json
+    transforms:
+      # Exactly the official augmentation list minus RandomZoomOut/RandomIoUCrop.
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5], probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [640, 640]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        epoch: [4, 64, 118]
+        ops: ['Mosaic', 'RandomPhotometricDistort']
+  collate_fn:
+    mixup_epochs: [4, 64]
+    stop_epoch: 118
+
+val_dataloader:
+  # Official evaluation batch, independent of the training global batch of 32.
+  total_batch_size: 64
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/val
+    ann_file: /root/zxy/experiments/data_subsets/sardet100k_screen_v1/val.json
