@@ -105,7 +105,10 @@ def match_edges(z, gt, iou_thr=0.5, border=0.02):
 
 
 def main(args):
-    z = np.load(args.npz)
+    # NpzFile does not cache arrays: repeated per-query indexing would unzip
+    # complete arrays thousands of times. Load the small statistics once.
+    with np.load(args.npz) as archive:
+        z = {key: archive[key] for key in archive.files}
     reconstruction_error = float(z['recon_err'])
     if not np.isfinite(reconstruction_error) or reconstruction_error >= 1e-4:
         raise ValueError('Distribution reconstruction failed; do not analyze signal')
