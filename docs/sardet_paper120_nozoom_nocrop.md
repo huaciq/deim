@@ -47,6 +47,15 @@ MixUp 已在 64 停止。普通水平翻转仍按官方实现保留，因此“�
 FP32 重算机制，以处理此前 FP16 非有限值；这是显式记录的工程差异，不是论文提出的方法。
 这次不修改训练引擎。子集结果只用于方向筛选，方法效果仍需在全集独立验证。
 
+## DataLoader 运行资源
+
+本服务器默认文件描述符软上限 1024、硬上限 65535。全局验证 batch=64、每卡 4 个
+worker 的默认预取会同时传递大量独立 CPU 张量；PyTorch 默认 file_descriptor 共享
+策略可能耗尽 1024 个句柄，触发 `received 0 items of ancdata`。
+启动脚本执行 `ulimit -Sn 65535`，仅提高本次进程及其子进程的软上限，硬上限不变。
+训练/验证 batch、workers、采样顺序、增强、学习率与模型计算全部保持本协议。
+参见 [故障修复记录](sardet_dataloader_fd_fix.md)。
+
 ## Git 更新及从 COCO 重新启动
 
 服务器已有子集，无需再次准备。先查看 Git 状态；存在已跟踪修改或分叉时先查看具体内容，
@@ -80,6 +89,7 @@ meta = dict(source_config=os.environ['CONFIG'], git_revision=(p/'git_revision.tx
     seed=0, devices=[0,1], world_size=2, global_batch_size=32, per_gpu_batch_size=16,
     initialization='/root/zxy/pretrain/deim/deim_dfine_hgnetv2_s_coco_120e.pth',
     initialization_mode='COCO tuning (-t), fresh optimizer, no resume',
+    file_descriptor_soft_limit=65535,
     protocol_note='120 total; official S flat/Dense=64; paper last-two-epoch tail=118; disable ZoomOut/IoUCrop',
     numerical_exception_policy='FP16 + FP32 loss; same nonfinite batch replayed once in FP32',
     resolved_config=cfg)
@@ -91,6 +101,7 @@ set -e
 cd /root/zxy/deim
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
+ulimit -Sn 65535
 export CUDA_VISIBLE_DEVICES=0,1
 export PYTHONUNBUFFERED=1
 exec torchrun --standalone --nproc_per_node=2 train.py \\
@@ -159,6 +170,7 @@ source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 OUT=/root/zxy/experiments/替换为本次实际目录
 LOG="$OUT/resume_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S).console.log"
+ulimit -Sn 65535
 nohup env CUDA_VISIBLE_DEVICES=0,1 PYTHONUNBUFFERED=1 torchrun --standalone --nproc_per_node=2 train.py \
   -c "$OUT/resolved_config.yml" -r "$OUT/last.pth" \
   --seed 0 --use-amp --output-dir "$OUT" \
@@ -181,6 +193,7 @@ conda activate deim_zxy
 OUT=/root/zxy/experiments/替换为本次实际目录
 STAGE=best_stg1
 EVAL=$(mktemp -d "$OUT/subsetval_${STAGE}_XXXXXX")
+ulimit -Sn 65535
 nohup env CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py \
   -c "$OUT/resolved_config.yml" -r "$OUT/$STAGE.pth" --test-only --use-amp \
   --output-dir "$EVAL" --summary-dir "$EVAL/summary" \
