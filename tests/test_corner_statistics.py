@@ -2,18 +2,25 @@ import ast
 import copy
 import inspect
 import textwrap
+from types import SimpleNamespace
 import unittest
 
 import numpy as np
 import torch
 
 from tools.corner_signal_analysis import corr, match_edges
-from tools.export_corner_stats import distribution_moments
+from tools.export_corner_stats import distribution_moments, projection_parameters
 import engine.deim.dfine_decoder as decoder_module
 from engine.deim.dfine_utils import distance2bbox, weighting_function
 
 
 class CornerStatisticsTests(unittest.TestCase):
+    def test_export_projection_keeps_parameter_shape(self):
+        decoder = SimpleNamespace(reg_max=32, up=torch.tensor([.5]), reg_scale=torch.tensor([4.]))
+        reg_max, _, scale, project = projection_parameters(decoder)
+        self.assertEqual((reg_max, scale, project.numel()), (32, 4., 33))
+        self.assertEqual((project.min().item(), project.max().item()), (-4., 4.))
+
     def test_diagnostic_eval_keys_preserve_original_logits_and_boxes(self):
         # Compare the two-key pre-change forward with the current forward on
         # the same decoder weights/features, including the real decoding path.

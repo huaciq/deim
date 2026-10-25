@@ -25,6 +25,16 @@ def distribution_moments(corners, project):
     return mean, variance.clamp_min(0).sqrt()
 
 
+def projection_parameters(decoder):
+    reg_max = int(decoder.reg_max)
+    up = decoder.up.detach().float().cpu()
+    # weighting_function concatenates 1-D tensors; keep the model parameter's
+    # shape here and convert to a scalar only for decoding/serialization.
+    scale = decoder.reg_scale.detach().float().cpu()
+    project = weighting_function(reg_max, up, scale).float().cpu()
+    return reg_max, up, float(scale.item()), project
+
+
 def main(args):
     torch.manual_seed(args.seed)
     cfg = YAMLConfig(args.config, resume=args.resume)
@@ -35,10 +45,7 @@ def main(args):
     model.load_state_dict(state)
     model.eval()
 
-    reg_max = int(model.decoder.reg_max)
-    up = model.decoder.up.detach().float().cpu()
-    reg_scale = float(model.decoder.reg_scale.detach().cpu().item())
-    project = weighting_function(reg_max, up, reg_scale).float().cpu()
+    reg_max, up, reg_scale, project = projection_parameters(model.decoder)
     fields = {key: [] for key in ['image_id', 'query_idx', 'score', 'label',
                                  'box', 'ref', 'mean', 'std']}
     reconstruction_error, n_images = 0.0, 0
