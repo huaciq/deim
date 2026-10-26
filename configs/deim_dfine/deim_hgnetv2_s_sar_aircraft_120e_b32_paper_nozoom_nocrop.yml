@@ -1,0 +1,15 @@
+# SAR-AIRcraft-1.0: preserve the release's train/val/test split and seven classes.
+__include__: ['./deim_hgnetv2_s_sardet100k_baseline_120e_b32_paper_nozoom_nocrop.yml']
+
+output_dir: /root/zxy/experiments/deim_s_sar_aircraft_paper120_b32_nozoom_nocrop/seed0
+num_classes: 7
+
+train_dataloader:
+  dataset:
+    img_folder: /root/zxy/datasets/SAR-AIRcraft-1.0
+    ann_file: /root/zxy/datasets/SAR-AIRcraft-1.0/COCO/train.json
+
+val_dataloader:
+  dataset:
+    img_folder: /root/zxy/datasets/SAR-AIRcraft-1.0
+    ann_file: /root/zxy/datasets/SAR-AIRcraft-1.0/COCO/val.json
