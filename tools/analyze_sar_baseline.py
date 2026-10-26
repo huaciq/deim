@@ -24,7 +24,7 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 from tools.sar_analysis_core import (ERROR_NAMES, SCALE_EDGES, SCALE_LABELS, error_analysis,
-                                    load_json, object_size, save_json, summarize_values,
+                                    load_json, object_size, save_json, scale_bin, summarize_values,
                                     training_summary)
 
 METRICS = ('AP', 'AP50', 'AP75', 'AP_small', 'AP_medium', 'AP_large',
@@ -178,7 +178,7 @@ def scale_analysis(splits, objects, evaluation, output):
                        category=categories[g['category_id']], **size,
                        input_side_480=size['input_side'] * .75,
                        input_side_800=size['input_side'] * 1.25,
-                       scale_bin=__import__('tools.sar_analysis_core', fromlist=['scale_bin']).scale_bin(size['input_side']))
+                       scale_bin=scale_bin(size['input_side']))
             split_rows.append(row)
         rows.extend(split_rows)
         summaries[split] = dict(images=len(images), objects=len(split_rows),
@@ -231,7 +231,7 @@ def format_percent(value):
     return '—' if value is None or value < 0 else f'{value * 100:.2f}'
 
 
-def make_report(args, training, official, reproduced, class_results, scales, bins, errors, sensitivities, output, metadata):
+def make_report(args, training, official, reproduced, class_results, scales, bins, errors, sensitivities, output, metadata, localization):
     best = training['best_metrics']
     final = training['last_metrics']
     original_counts = dict(small=sum(a['area'] < 32 ** 2 for a in load_json(args.annotations / 'val.json')['annotations']),
@@ -255,13 +255,22 @@ def make_report(args, training, official, reproduced, class_results, scales, bin
         '| 指标（%） | 日志最佳 | 最佳权重复算 | 末轮 |', '|---|---:|---:|---:|']
     for i, key in [(0, 'AP'), (1, 'AP50'), (2, 'AP75'), (8, 'AR100')]:
         lines.append(f'| {key} | {format_percent(best[i])} | {format_percent(reproduced[key])} | {format_percent(final[i])} |')
-    lines += ['', '**AR100 是 IoU=.50:.95 的平均召回，不是固定 IoU=.50 的 Recall。**',
+    lines += ['', f"独立导出使用每卡 batch={metadata['batch_per_gpu']}（原验证为每卡 32），AP 与训练日志差 "
+              f"{(reproduced['AP'] - best[0]) * 100:+.6f} 个百分点。原评估后端与 pycocotools 对同一导出结果得到一致 AP；"
+              '不同 batch 下的浮点计算与接近阈值的框会造成细小数值差异，表中保留日志与复算两个口径，不覆盖原指标。', '',
+              '**AR100 是 IoU=.50:.95 的平均召回，不是固定 IoU=.50 的 Recall。**',
               f"同一最佳权重的 COCO Recall@IoU.50={format_percent(reproduced['recall50'])}%，"
-              f"Recall@IoU.75={format_percent(reproduced['recall75'])}%（maxDets=100，每图每类）。", '',
+              f"Recall@IoU.75={format_percent(reproduced['recall75'])}%（maxDets=100，每图每类）。"
+              '这两个 COCO Recall 为按类宏平均且不按 score 截断；后文固定阈值 Recall 按全部 GT 微平均，口径不同。', '',
               '### 各类结果', '', '| 类别 | GT | AP | AP50 | AP75 | AR100 | Recall（score≥0.3, IoU≥0.5） |', '|---|---:|---:|---:|---:|---:|---:|']
     for row in class_results:
         lines.append('| ' + ' | '.join([row['category'], str(row['gt'])] + [format_percent(row[k]) for k in ['AP', 'AP50', 'AP75', 'AR100', 'operational_recall']]) + ' |')
-    lines += ['', '## 2. 训练曲线与收敛', '',
+    lowest = sorted(class_results, key=lambda r:r['AP'])[:3]
+    worst_recall = min(class_results, key=lambda r:r['operational_recall'])
+    lines += ['', '当前 AP 最低的三类是 ' + '、'.join(f"{r['category']}（{100 * r['AP']:.2f}）" for r in lowest) + '。'
+              f"固定阈值下召回最低的是 {worst_recall['category']}（{100 * worst_recall['operational_recall']:.2f}%）；"
+              'A330 只有 27 个验证目标，较高 AP 不应被视为已经充分验证。', '',
+              '## 2. 训练曲线与收敛', '',
               f"首次达到距离全程最佳不超过 0.5 AP 点：epoch {training['first_epoch_within_0_5_ap_point']}。"
               f"最后 12 轮 AP 均值 {100 * training['last12_ap_mean']:.4f}，标准差 {100 * training['last12_ap_std']:.4f} 点，"
               f"极差 {100 * training['last12_ap_range']:.4f} 点；最佳到末轮差 {(best[0] - final[0]) * 100:.4f} AP 点。", '',
@@ -289,7 +298,9 @@ def make_report(args, training, official, reproduced, class_results, scales, bin
     lines += ['', '输入尺度 AP 在把 GT 与预测框一同换算到 640 后重新执行 COCO area-range 评估，'
               '保留所有图像和预测，并按 COCO 规则忽略分组之外的 GT/检测；不通过简单删 GT 制造额外背景误检。', '',
               f"原图 COCO small/medium/large 的 GT 数分别为 {original_counts['small']}/{original_counts['medium']}/{original_counts['large']}。"
-              '原图 APs 不能直接代表网络中的小目标性能；样本极少的分组不作稳定结论。', '',
+              '原图 APs 不能直接代表网络中的小目标性能；样本极少的分组不作稳定结论。'
+              '输入 <16 像素组没有验证样本，因此本实验无法检验极小目标能力。'
+              '各尺寸组类别构成不同，不能把分组 Recall 的差异直接归因为尺寸；交叉明细见 `class_scale_recall.csv`。', '',
               '![目标尺度分布和分组性能](target_scales.png)', '',
               '完整宽高、√area、480/640/800 换算及分组在 [目标尺寸 CSV](object_sizes_all_splits.csv)。', '',
               '## 4. 错误类型与阈值敏感性', '',
@@ -309,11 +320,19 @@ def make_report(args, training, official, reproduced, class_results, scales, bin
               '4. 只与异类 GT 有 0.1≤IoU<0.5：分类与定位同时错误。',
               '5. 与所有 GT 的最大 IoU<0.1：背景误检。', '',
               '额外保留“分类与定位同时错误”以完整覆盖预测，避免把它混入背景或纯定位。'
-              '这是本项目的数量分解，不是 TIDE 的 dAP 贡献分析；IoU 阈值、置信度和类别占比都会影响数量。', '',
+              '这是本项目的数量分解，不是 TIDE 的 dAP 贡献分析；IoU 阈值、置信度和类别占比都会影响数量。'
+              '背景类别是相对现有 GT 的几何判定，不能单凭这一类别认定区域中没有真实目标；案例中保留未匹配高分响应供复核，不自动改标注。', '',
               '| score 阈值 | TP | FP | FN | Precision | Recall | F1 |', '|---|---:|---:|---:|---:|---:|---:|']
     for row in sensitivities:
         lines.append(f"| {row['score_threshold']} | {row['tp']} | {row['fp']} | {row['fn']} | {100 * row['precision']:.2f} | {100 * row['recall']:.2f} | {100 * row['f1']:.2f} |")
-    lines += ['', '![错误统计](errors_and_confusion.png)', '',
+    lines += ['', f"IoU≥0.5 的 {localization['matched']} 个 TP 中，仍有 {localization['iou_50_to_75']} 个"
+              f"（{100 * localization['fraction_below_75']:.2f}%）的 IoU<0.75；"
+              f"匹配 IoU 中位数 {localization['iou']['p50']:.3f}。"
+              f"所以“纯定位 FP 只有 {errors['fp_types']['localization']['count']} 个”不能证明高精度定位已解决，AP50 与 AP75 的差仍需结合 TP 框质量理解。"
+              '这组配对统计基于 score≥0.3 的已检出目标，存在选择偏差，不等于全部 GT 的定位误差。', '',
+              f"分类与背景两类合计占 FP 的 {100 * (errors['fp_types']['classification']['count'] + errors['fp_types']['background']['count']) / errors['fp']:.2f}%。"
+              '它们是当前数量最多的误检来源，但计数不等于 AP 损失贡献；不能据此直接断言某个模块的收益。', '',
+              '![错误统计](errors_and_confusion.png)', '',
               '明细见 [预测分类 CSV](prediction_errors.csv)、[漏检 CSV](missed_gt.csv)、[各类指标 CSV](class_performance.csv)。', '',
               '## 5. SAR 困难样本案例库', '',
               '图例、完整候选案例与筛选依据见 [案例库](cases/index.html)、[案例清单](cases/case_manifest.csv)。'
@@ -391,12 +410,39 @@ def main():
     figure_save(fig, output / 'errors_and_confusion.png')
     csv_write(output / 'classification_associations.csv', [dict(gt=categories[i], predicted=categories[j], count=int(matrix[i, j]))
                                                          for i in range(len(categories)) for j in range(len(categories))])
+    gt_by_id = {g['id']:g for g in splits['val']['annotations']}
+    im_by_id = {im['id']:im for im in splits['val']['images']}
+    localization_rows = []
+    for record in records:
+        if record['kind'] != 'tp':
+            continue
+        g = gt_by_id[record['gt_id']]
+        im = im_by_id[g['image_id']]
+        x, y, w, h = g['bbox']
+        px, py, pw, ph = record['bbox']
+        localization_rows.append(dict(gt_id=g['id'], image_id=g['image_id'], iou=record['iou'],
+                                      dx640=(px + pw / 2 - x - w / 2) * 640 / im['width'],
+                                      dy640=(py + ph / 2 - y - h / 2) * 640 / im['height'],
+                                      width_ratio=pw / w, height_ratio=ph / h))
+    csv_write(output / 'matched_box_quality.csv', localization_rows)
+    localization = dict(matched=len(localization_rows),
+                        iou_50_to_75=sum(r['iou'] < .75 for r in localization_rows),
+                        fraction_below_75=sum(r['iou'] < .75 for r in localization_rows) / max(1, len(localization_rows)),
+                        **{k:summarize_values([r[k] for r in localization_rows])
+                           for k in ['iou', 'dx640', 'dy640', 'width_ratio', 'height_ratio']})
+    csv_write(output / 'class_scale_recall.csv',
+              [dict(category=c['category'], scale=label,
+                    gt=len(members), tp=sum(o['detected'] for o in members),
+                    recall=sum(o['detected'] for o in members) / len(members) if members else None)
+               for c in class_results for label in SCALE_LABELS
+               for members in [[o for o in objects if o['category_id'] == c['category_id'] and o['scale_bin'] == label]]])
     result = dict(training=summary, reproduced_metrics=metrics, reproduced_coco_stats=evaluation.stats.tolist(),
                   metric_reproduction_delta_ap=metrics['AP'] - summary['best_metrics'][0],
                   classes=class_results, scales=scales, input_scale_performance=bins,
-                  errors=errors, threshold_sensitivity=sensitivity, prediction_metadata=metadata)
+                  errors=errors, threshold_sensitivity=sensitivity, prediction_metadata=metadata,
+                  matched_localization=localization)
     save_json(output / 'summary.json', result)
-    make_report(args, summary, evaluation, metrics, class_results, scales, bins, errors, sensitivity, output, metadata)
+    make_report(args, summary, evaluation, metrics, class_results, scales, bins, errors, sensitivity, output, metadata, localization)
     print(json.dumps(dict(best_epoch=summary['best_epoch'], metrics=metrics, errors=errors,
                          scale_bins=bins, reproduction_delta_ap=result['metric_reproduction_delta_ap']), indent=2), flush=True)
 
