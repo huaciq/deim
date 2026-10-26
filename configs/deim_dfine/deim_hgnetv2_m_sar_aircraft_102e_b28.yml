@@ -45,9 +45,19 @@ train_dataloader:
     img_folder: /root/zxy/datasets/SAR-AIRcraft-1.0
     ann_file: /root/zxy/datasets/SAR-AIRcraft-1.0/COCO/train.json
     transforms:
-      # Complete official M augmentation, including ZoomOut and IoUCrop.
+      # Official M operations minus the two augmentations disabled by the user.
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5], probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [640, 640]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
       policy:
         epoch: [4, 49, 90]
+        ops: ['Mosaic', 'RandomPhotometricDistort']
   collate_fn:
     base_size: 640
     base_size_repeat: 6

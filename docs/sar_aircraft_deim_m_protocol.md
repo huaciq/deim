@@ -21,6 +21,7 @@
 | LR scheduler | 官方 flatcosine，二次 warmup=2000 steps，flat_epoch=49，lr_gamma=0.5 |
 | 最小 LR | 主组 1.75e-4；backbone 非 BN 组 1.75e-5 |
 | 强增强边界 | [4,49,90]；epoch=90 起进入最后 12 轮收尾 |
+| 关闭增强 | RandomZoomOut、RandomIoUCrop 全程关闭；其余沿用官方 M |
 | 精度 / seed | AMP FP16 + GradScaler，seed=0 |
 | EMA / norm | EMA decay=0.9999、warmups=1000；BN 不冻结、SyncBN、clip norm=0.1 |
 
@@ -68,17 +69,20 @@ flat_iter=5292，余弦下降至 step=9720，最后 1296 steps 维持最小 LR�
 
 ## 增强口径
 
-本配置按用户表格“保留官方”固化为完整官方 M 增强；已通过异步问题提示这一口径，
-未收到替代选择时采用该默认值。它包含：
+用户已明确确认：**关闭 RandomZoomOut、RandomIoUCrop，其余沿用官方 M**。
+两项已从 transforms.ops 和 policy.ops 中移除，保留：
 
 - Mosaic 外层 p=0.5，内部 probability=1.0；MixUp p=0.5，均在 4≤epoch<49 开启。
-- PhotometricDistort p=0.5、RandomZoomOut 默认 p=0.5、RandomIoUCrop p=0.8，
-  在 4≤epoch<90 按官方 Compose 规则使用；Mosaic 生效的样本跳过 ZoomOut/IoUCrop。
+- PhotometricDistort p=0.5，在 4≤epoch<90 使用。
 - 水平翻转 p=0.5；训练多尺度 480..800、步长 32，640 在 16 个候选中占 6 个。
 - epoch 90..101 停止强增强和多尺度，固定 640；普通水平翻转继续按官方实现保留。
 
 640 在本协议中是基础/验证尺寸，并非全程禁止多尺度。增强停止点是零起始日志
 epoch=90，即完成前 90 轮之后进入 12 轮收尾。
+
+此次确认只调整上述两项增强及对应 policy 列表；102 轮、batch 28、两组学习率、
+2000 步预热、[4,49,90] 调度和 480–800 多尺度保持不变。配置合并后已核对，剩余操作
+及其参数与官方 M 完全一致。权重加载和参数组未受影响，沿用此前 CPU 核对结果。
 
 ## Git、环境和未来训练命令（本次不执行训练）
 
