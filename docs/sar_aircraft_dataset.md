@@ -148,3 +148,54 @@ printf '%s\n' "$PID" > "$EVAL/launcher.pid"
 disown "$PID"
 tail -f "$EVAL/console.log"
 ```
+
+## 实际完成记录：2026-10-26
+
+数据已准备在 `/root/zxy/datasets/SAR-AIRcraft-1.0`，原 ZIP 保留。
+执行代码 revision=`307bea8`，解压得到全部 8,740 个文件（4,368 JPEG、4,368 XML、4 个划分 TXT）。
+生成的 4 份 COCO JSON、category_map.json 和 stats.json 均位于根目录 COCO/ 下。
+
+| 划分 | 图像数 | 目标数 | 空图 |
+| --- | ---: | ---: | ---: |
+| train | 3047 | 11551 | 0 |
+| val | 442 | 1962 | 0 |
+| trainval | 3489 | 13513 | 0 |
+| test | 879 | 2950 | 0 |
+
+trainval 是 train+val，并非额外数据，不能将四行总数相加作为数据集总量。
+train/val/test 互不重叠，总计 4,368 张、16,463 个目标。
+
+| ID | 原类别名 | 全数据目标数 |
+| --- | --- | ---: |
+| 0 | A220 | 3730 |
+| 1 | A320/321 | 1771 |
+| 2 | A330 | 309 |
+| 3 | ARJ21 | 1187 |
+| 4 | Boeing737 | 2557 |
+| 5 | Boeing787 | 2645 |
+| 6 | other | 4264 |
+
+图像尺寸统计：800×800：1,312；1000×1000：1,085；1200×1200：1,038；1500×1500：933。
+所有 JPEG 头部尺寸与 XML 一致；全部源框有效，没有静默剔除、裁剪或平移框。
+COCO 框还原 XML 端点的最大误差为 **0**。
+
+本地 3 项定向回归通过：坐标端点保持不变、非法框不被静默裁剪、原划分/稳定 ID/
+类别映射/空图保留。服务器完成全部图像尺寸与 XML 的转换验证，并再次读取全部输出
+确认数量、标注引用、类别 ID、划分集合及端点还原。
+七类配置已核对全部 train/val 图像路径可解析，除数据路径、类别数、输出目录和 include 外，
+解析后的固定训练设置与现有全集 baseline 相同。本次没有启动训练。
+
+准备日志与完成状态：
+
+```text
+/root/zxy/experiments/data_preparation/sar_aircraft_20261026_115139_thdSqg/
+```
+
+该目录保留 console.log、git_revision.txt、prepare.sh、final_status.json。
+初次 shell 包装的退出码变量被提前展开，故日志末尾保留状态记录错误；转换器本身已经
+完成。随后完整核对四份 JSON 的数量/划分/坐标，保存最终完成状态并修正包装脚本，
+没有重新解压或覆盖原始标注。初次包装和状态记录另保留为 prepare_attempt1.sh、exit_attempt1.code。
+应以 final_status.json 和 COCO/stats.json 读取完成结果。
+
+本地统计与交接副本：`C:/Users/DELL/.codex/artifacts/sar_aircraft_prepare_20261026/`。
+数据本体、COCO 标注和服务器日志均未提交 Git；工具、定向回归、配置和本文已提交。
