@@ -361,7 +361,7 @@ def main():
     for k, category in enumerate(evaluation.params.catIds):
         name = next(c['name'] for c in splits['val']['categories'] if c['id'] == category)
         members = [o for o in objects if o['category_id'] == category]
-        class_results.append(dict(category=name, category_id=category, gt=len(members),
+        class_results.append(dict(category=name, category_id=int(category), gt=len(members),
                                   **area_metrics(evaluation, category=k),
                                   operational_recall=sum(o['detected'] for o in members) / len(members) if members else None))
     csv_write(output / 'class_performance.csv', class_results)
