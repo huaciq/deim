@@ -1,0 +1,61 @@
+# Frozen SAR-AIRcraft seven-class DEIM-M protocol; do not start automatically.
+# See docs/sar_aircraft_deim_m_protocol.md. Inherit official M directly.
+__include__: ['./deim_hgnetv2_m_coco.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_102e_b28/seed0
+seed: 0
+num_classes: 7
+remap_mscoco_category: False
+
+# Initialize the full detector through train.py -t, not a backbone-only load.
+HGNetv2:
+  pretrained: False
+
+optimizer:
+  type: AdamW
+  params:
+    - params: '^(?=.*backbone)(?!.*bn).*$'
+      lr: 0.000035
+    - params: '^(?=.*(?:norm|bn)).*$'
+      weight_decay: 0.0
+  lr: 0.00035
+  betas: [0.9, 0.999]
+  weight_decay: 0.0001
+
+epoches: 102
+lrsheduler: flatcosine
+warmup_iter: 2000
+flat_epoch: 49
+no_aug_epoch: 12
+lr_gamma: 0.5
+eval_spatial_size: [640, 640]
+
+use_ema: True
+use_amp: True
+amp_dtype: float16
+amp_loss_fp32: True
+# Keep the project's existing nonfinite-batch handling; no new model/loss.
+amp_fp32_retry: True
+scaler:
+  enabled: True
+
+train_dataloader:
+  total_batch_size: 28  # GLOBAL: 14 per GPU with CUDA_VISIBLE_DEVICES=0,1.
+  dataset:
+    img_folder: /root/zxy/datasets/SAR-AIRcraft-1.0
+    ann_file: /root/zxy/datasets/SAR-AIRcraft-1.0/COCO/train.json
+    transforms:
+      # Complete official M augmentation, including ZoomOut and IoUCrop.
+      policy:
+        epoch: [4, 49, 90]
+  collate_fn:
+    base_size: 640
+    base_size_repeat: 6
+    mixup_epochs: [4, 49]
+    stop_epoch: 90
+
+val_dataloader:
+  total_batch_size: 64  # Official evaluation batch; 32 per GPU.
+  dataset:
+    img_folder: /root/zxy/datasets/SAR-AIRcraft-1.0
+    ann_file: /root/zxy/datasets/SAR-AIRcraft-1.0/COCO/val.json
