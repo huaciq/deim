@@ -1,0 +1,33 @@
+# M1/SCS only. All training/evaluation settings inherit the frozen baseline.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_scs_m1_102e_b28/seed0
+
+DFINETransformer:
+  use_scs: True
+  scs_hidden_dim: 128
+
+train_dataloader:
+  collate_fn:
+    scs_signatures: True
+    scs_ring_scale: 2.0
+    scs_clip: 5.0
+    scs_epsilon: 0.00392156862745098
+
+DEIMCriterion:
+  use_scs: True
+  scs_margin: 0.5
+  scs_smooth_l1_beta: 0.1
+  weight_dict:
+    loss_scs_sig: 1.0
+    loss_scs_pair: 0.1
+  # Membership fixed from baseline val confusion (test unused).
+  # Directional weights use ONLY train rival counts: invsqrt(n_k), row-normalized.
+  # IDs: 0=A220, 3=ARJ21, 4=Boeing737, 5=Boeing787. No 'other' pair.
+  scs_pairs:
+    - [0, 3, 0.6751032809381793]
+    - [0, 5, 0.32489671906182077]
+    - [3, 0, 0.4324430563574028]
+    - [3, 4, 0.5675569436425971]
+    - [4, 3, 1.0]
+    - [5, 0, 1.0]

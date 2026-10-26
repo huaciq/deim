@@ -25,6 +25,7 @@ from .scatter_clutter_suppression import ScatterAwareClutterSuppression
 from .background_rejection import SimpleBackgroundRejection
 from .boundary_refinement import BoundaryRefinementLoss
 from .scale_aware_refinement import ScaleAwareRefinement
+from .scattering_signature import ScatteringSignatureHead
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -342,7 +343,8 @@ class TransformerDecoder(nn.Module):
                 reg_scale,
                 attn_mask=None,
                 memory_mask=None,
-                dn_meta=None):
+                dn_meta=None,
+                return_query_features=False):
         output = target
         output_detach = pred_corners_undetach = 0
         value = self.value_op(memory, None, None, memory_mask, spatial_shapes)
@@ -397,8 +399,9 @@ class TransformerDecoder(nn.Module):
             ref_points_detach = inter_ref_bbox.detach()
             output_detach = output.detach()
 
-        return torch.stack(dec_out_bboxes), torch.stack(dec_out_logits), \
-               torch.stack(dec_out_pred_corners), torch.stack(dec_out_refs), pre_bboxes, pre_scores
+        result = (torch.stack(dec_out_bboxes), torch.stack(dec_out_logits),
+                  torch.stack(dec_out_pred_corners), torch.stack(dec_out_refs), pre_bboxes, pre_scores)
+        return result + (output,) if return_query_features else result
 
 
 @register()
@@ -447,6 +450,8 @@ class DFINETransformer(nn.Module):
                  sar_num_scales=3,
                  sar_pooled_size=7,
                  sar_fp32_ops=True,
+                 use_scs=False,
+                 scs_hidden_dim=128,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -588,7 +593,18 @@ class DFINETransformer(nn.Module):
 
         self._reset_parameters(feat_channels)
 
+        self.use_scs = use_scs
+        self.scs_head = None
+        if use_scs:
+            final_dim = hidden_dim if num_layers <= self.eval_idx + 1 else scaled_dim
+            # A training-only head must not perturb common model initialization
+            # or the seed's subsequent data/denoising random sequence.
+            with torch.random.fork_rng(devices=[]):
+                self.scs_head = ScatteringSignatureHead(final_dim, scs_hidden_dim)
+
     def convert_to_deploy(self):
+        self.scs_head = None
+        self.use_scs = False
         self.dec_score_head = nn.ModuleList([nn.Identity()] * (self.eval_idx) + [self.dec_score_head[self.eval_idx]])
         self.dec_bbox_head = nn.ModuleList(
             [self.dec_bbox_head[i] if i <= self.eval_idx else nn.Identity() for i in range(len(self.dec_bbox_head))]
@@ -793,7 +809,7 @@ class DFINETransformer(nn.Module):
             self._get_decoder_input(memory, spatial_shapes, denoising_logits, denoising_bbox_unact)
 
         # decoder
-        out_bboxes, out_logits, out_corners, out_refs, pre_bboxes, pre_logits = self.decoder(
+        decoder_results = self.decoder(
             init_ref_contents,
             init_ref_points_unact,
             memory,
@@ -806,7 +822,11 @@ class DFINETransformer(nn.Module):
             self.up,
             self.reg_scale,
             attn_mask=attn_mask,
-            dn_meta=dn_meta)
+            dn_meta=dn_meta,
+            return_query_features=self.use_scs and self.training)
+
+        out_bboxes, out_logits, out_corners, out_refs, pre_bboxes, pre_logits = decoder_results[:6]
+        final_queries = decoder_results[6] if self.use_scs and self.training else None
 
         if self.training and dn_meta is not None:
             # the output from the first decoder layer, only one
@@ -818,6 +838,8 @@ class DFINETransformer(nn.Module):
 
             dn_out_corners, out_corners = torch.split(out_corners, dn_meta['dn_num_split'], dim=2)
             dn_out_refs, out_refs = torch.split(out_refs, dn_meta['dn_num_split'], dim=2)
+            if final_queries is not None:
+                _, final_queries = torch.split(final_queries, dn_meta['dn_num_split'], dim=1)
 
 
         if self.training:
@@ -828,6 +850,9 @@ class DFINETransformer(nn.Module):
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1],
                    'pred_corners': out_corners[-1], 'ref_points': out_refs[-1],
                    'up': self.up, 'reg_scale': self.reg_scale}
+
+        if final_queries is not None:
+            out['pred_scs'] = self.scs_head(final_queries)
 
         # Apply SCAS (Scatter-Aware Clutter Suppression) if enabled
         if self.scas is not None:

@@ -203,6 +203,9 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
                 lr_warmup_scheduler.step()
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced)
+        if 'pred_scs' in outputs:
+            validity = torch.cat([target['scs_valid'] for target in targets])
+            metric_logger.update(scs_valid_fraction=validity.float().mean().item() if validity.numel() else 0.0)
         if amp_fp32_retry:
             metric_logger.update(fp32_retry_rate=float(retried_fp32))
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])

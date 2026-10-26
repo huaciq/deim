@@ -102,7 +102,11 @@ class BatchImageCollateFunction(BaseCollateFunction):
         mixup_prob=0.0,
         mixup_epochs=[0, 0],
         data_vis=False,
-        vis_save='./vis_dataset/'
+        vis_save='./vis_dataset/',
+        scs_signatures=False,
+        scs_ring_scale=2.0,
+        scs_clip=5.0,
+        scs_epsilon=1.0 / 255,
     ) -> None:
         super().__init__()
         self.base_size = base_size
@@ -119,6 +123,10 @@ class BatchImageCollateFunction(BaseCollateFunction):
             print("     ### Multi-scale Training until {} epochs ### ".format(self.stop_epoch))
             print("     ### Multi-scales@ {} ###        ".format(self.scales))
         self.print_info_flag = True
+        self.scs_signatures = scs_signatures
+        self.scs_ring_scale, self.scs_clip, self.scs_epsilon = scs_ring_scale, scs_clip, scs_epsilon
+        if scs_signatures:
+            print('     ### SCS: 28-D targets after transforms, before MixUp/multiscale ###')
         # self.interpolation = interpolation
 
     def apply_mixup(self, images, targets):
@@ -154,6 +162,9 @@ class BatchImageCollateFunction(BaseCollateFunction):
                 updated_targets[i]['boxes'] = torch.cat([targets[i]['boxes'], shifted_targets[i]['boxes']], dim=0)
                 updated_targets[i]['labels'] = torch.cat([targets[i]['labels'], shifted_targets[i]['labels']], dim=0)
                 updated_targets[i]['area'] = torch.cat([targets[i]['area'], shifted_targets[i]['area']], dim=0)
+                if self.scs_signatures:
+                    for key in ('scs_signature', 'scs_valid'):
+                        updated_targets[i][key] = torch.cat([targets[i][key], shifted_targets[i][key]], dim=0)
 
                 # Add mixup ratio to targets
                 updated_targets[i]['mixup'] = torch.tensor(
@@ -180,6 +191,13 @@ class BatchImageCollateFunction(BaseCollateFunction):
     def __call__(self, items):
         images = torch.cat([x[0][None] for x in items], dim=0)
         targets = [x[1] for x in items]
+
+        if self.scs_signatures:
+            from ..deim.scattering_signature import scattering_descriptors
+            descriptions = scattering_descriptors(images, targets, self.scs_ring_scale,
+                                                   self.scs_clip, self.scs_epsilon)
+            for target, (signature, valid) in zip(targets, descriptions):
+                target['scs_signature'], target['scs_valid'] = signature, valid
 
         # Mixup
         images, targets = self.apply_mixup(images, targets)

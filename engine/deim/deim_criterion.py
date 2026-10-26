@@ -19,6 +19,7 @@ from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou, wasserste
 from .sar_boundary import generate_gt_boundary_map
 from .background_rejection import SBRLoss
 from .boundary_refinement import BRLCriterion
+from .scattering_signature import SCSLoss
 from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
@@ -45,6 +46,10 @@ class DEIMCriterion(nn.Module):
         sbr_neg_iou_threshold=0.3,
         sbr_ignore_iou_threshold=0.5,
         sbr_bg_label_metric='iou',
+        use_scs=False,
+        scs_pairs=None,
+        scs_margin=0.5,
+        scs_smooth_l1_beta=0.1,
         ):
         """Create the criterion.
         Parameters:
@@ -81,6 +86,7 @@ class DEIMCriterion(nn.Module):
 
         # BRL criterion (optional)
         self.brl_criterion = BRLCriterion(loss_weight=2.0)
+        self.scs_loss = SCSLoss(num_classes, scs_pairs or [], scs_margin, scs_smooth_l1_beta) if use_scs else None
 
     def loss_labels_focal(self, outputs, targets, indices, num_boxes):
         assert 'pred_logits' in outputs
@@ -548,6 +554,12 @@ class DEIMCriterion(nn.Module):
             # Only apply loss if the key exists in weight_dict
             brl_loss_dict = {k: v * self.weight_dict[k] for k, v in brl_loss_dict.items() if k in self.weight_dict}
             losses.update(brl_loss_dict)
+
+        if self.scs_loss is not None:
+            # Only final-layer original Hungarian matches; no union, aux, DN,
+            # or encoder labels enter the instance-description supervision.
+            scs_losses = self.scs_loss(outputs, targets, indices)
+            losses.update({name:value * self.weight_dict[name] for name, value in scs_losses.items()})
 
         # Keep numerical failures visible to the engine before backward.
         # Replacing a NaN loss with zero does not repair its backward graph.
