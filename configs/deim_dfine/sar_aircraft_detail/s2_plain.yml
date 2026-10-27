@@ -1,0 +1,24 @@
+# B1: test the value of stride-4 detail without an additional structure operator.
+# Prepared only; launch explicitly after reviewing the experiment decision.
+__include__: ['../deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_s2_plain_seed0
+experiment_protocol_document: docs/sar_s2_detail_experiments.md
+
+HGNetv2:
+  return_idx: [0, 1, 2, 3]
+
+HybridEncoder:
+  p2_channels: null
+  use_detail_preservation: False
+  use_boundary_map: False
+  use_afs: False
+  use_spi: False
+  use_dsg: False
+  s2_injection_mode: plain
+  s2_channels: 96
+  s2_strip_kernel: 19
+
+DFINETransformer:
+  use_scs: False
+  use_slqc: False
+  use_mpq: False

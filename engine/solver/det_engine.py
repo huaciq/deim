@@ -76,6 +76,10 @@ def _module_training_metrics(model):
         branch = getattr(getattr(module, owner, None), name, None)
         if branch is not None:
             values[name + '_alpha'] = branch.alpha.detach().float().item()
+    detail = getattr(getattr(module, 'encoder', None), 's2_injection', None)
+    if detail is not None:
+        values['s2_gamma_mean_abs'] = detail.downsample.norm.weight.detach().float().abs().mean().item()
+        values.update({name: value.item() for name, value in detail.last_metrics.items()})
     return values
 
 

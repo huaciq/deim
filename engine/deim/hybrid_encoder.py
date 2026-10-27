@@ -21,6 +21,7 @@ from .scattering_pattern_isolation import ScatteringPatternIsolation
 
 from ..core import register
 from .directional_subband import DirectionalSubbandGate
+from .shallow_detail import ShallowDetailInjection
 
 __all__ = ['HybridEncoder']
 
@@ -364,6 +365,9 @@ class HybridEncoder(nn.Module):
                  use_dsg=False,
                  dsg_bottleneck=64,
                  dsg_mode='directional',
+                 s2_injection_mode=None,
+                 s2_channels=None,
+                 s2_strip_kernel=19,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -380,6 +384,12 @@ class HybridEncoder(nn.Module):
         self.use_detail_preservation = use_detail_preservation
         self.use_afs = use_afs
         self.use_spi = use_spi
+
+        if s2_injection_mode is not None:
+            if p2_channels is not None or use_detail_preservation:
+                raise ValueError('S2 injection is an alternative to the existing Haar/DPM path.')
+            if s2_channels is None or feat_strides[0] != 8:
+                raise ValueError('S2 injection requires s2_channels and a stride-8 first output.')
 
         # Optional P2 detail injection via Haar wavelet downsampling
         if p2_channels is not None:
@@ -495,6 +505,12 @@ class HybridEncoder(nn.Module):
             with torch.random.fork_rng(devices=[]):
                 self.dsg = DirectionalSubbandGate(hidden_dim, dsg_bottleneck, dsg_mode)
 
+        self.s2_injection = None
+        if s2_injection_mode is not None:
+            with torch.random.fork_rng(devices=[]):
+                self.s2_injection = ShallowDetailInjection(
+                    s2_channels, hidden_dim, s2_injection_mode, s2_strip_kernel)
+
     def _reset_parameters(self):
         if self.eval_spatial_size:
             for idx in self.use_encoder_idx:
@@ -537,6 +553,12 @@ class HybridEncoder(nn.Module):
             p2_down = self.p2_inject(p2_feat)
             proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
             proj_feats[0] = proj_feats[0] + p2_down  # Residual injection
+        elif self.s2_injection is not None:
+            # Extra HGNet output is consumed here; the decoder still gets S3/S4/S5.
+            assert len(feats) == len(self.in_channels) + 1
+            s2, feats = feats[0], feats[1:]
+            proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+            proj_feats[0] = self.s2_injection(s2, proj_feats[0])
         else:
             assert len(feats) == len(self.in_channels)
             proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]

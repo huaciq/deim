@@ -1,0 +1,6 @@
+# B2: change only the S2 transform; D, detector and training protocol match B1.
+__include__: ['./s2_plain.yml']
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_s2_strip_seed0
+
+HybridEncoder:
+  s2_injection_mode: strip

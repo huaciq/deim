@@ -72,6 +72,9 @@ modules = {
     'dsg_mode': cfg.get('HybridEncoder', {}).get('dsg_mode', 'directional'),
     'mpq': bool(cfg.get('DFINETransformer', {}).get('use_mpq', False)),
     'mpq_prototype_counts': cfg.get('DFINETransformer', {}).get('mpq_prototype_counts'),
+    's2_injection_mode': cfg.get('HybridEncoder', {}).get('s2_injection_mode'),
+    's2_channels': cfg.get('HybridEncoder', {}).get('s2_channels'),
+    's2_strip_kernel': cfg.get('HybridEncoder', {}).get('s2_strip_kernel', 19),
 }
 metadata = dict(
     mode=mode, source_config=str(source), output_dir=str(run),
