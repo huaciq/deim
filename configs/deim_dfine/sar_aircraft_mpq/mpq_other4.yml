@@ -1,0 +1,5 @@
+# Experiment C: differs from B only in the number of other-class centers.
+__include__: ['./mpq_single.yml']
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_mpq_other4_seed0
+DFINETransformer:
+  mpq_prototype_counts: [1, 1, 1, 1, 1, 1, 4]

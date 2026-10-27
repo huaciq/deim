@@ -1,0 +1,24 @@
+# Experiment B: seven single centers; isolate direct semantic query supervision.
+__include__: ['../deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_mpq_single_seed0
+experiment_protocol_document: docs/sar_mpq_experiments.md
+
+DFINETransformer:
+  use_mpq: True
+  use_scs: False
+  use_slqc: False
+  mpq_projection_dim: 128
+  mpq_prototype_counts: [1, 1, 1, 1, 1, 1, 1]
+  mpq_prototype_temperature: 0.1
+  mpq_class_temperature: 0.1
+
+HybridEncoder:
+  use_dsg: False
+
+DEIMCriterion:
+  use_mpq: True
+  mpq_min_iou: 0.7
+  mpq_start_epoch: 49
+  mpq_ramp_epochs: 5
+  weight_dict:
+    loss_mpq: 0.05

@@ -215,6 +215,10 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced)
         branch_metrics = _module_training_metrics(model)
+        mpq_loss = getattr(criterion, 'mpq_loss', None)
+        if mpq_loss is not None:
+            mpq_metrics = dist_utils.reduce_dict(mpq_loss.last_metrics)
+            branch_metrics.update({name: value.item() for name, value in mpq_metrics.items()})
         metric_logger.update(**branch_metrics)
         if 'pred_scs' in outputs:
             validity = torch.cat([target['scs_valid'] for target in targets])

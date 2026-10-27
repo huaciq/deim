@@ -55,7 +55,8 @@ if mode == 'new':
     (run / 'resolved_config.yml').write_text(yaml.safe_dump(cfg, sort_keys=False), encoding='utf-8')
     (run / 'git_revision.txt').write_text(revision + '\n', encoding='utf-8')
     (run / 'git_worktree_status.txt').write_text(subprocess.check_output(['git', 'status', '--short'], text=True), encoding='utf-8')
-    (run / 'method_and_protocol.md').write_text(Path('docs/sar_structure_frequency_experiments.md').read_text(encoding='utf-8'), encoding='utf-8')
+    protocol = cfg.get('experiment_protocol_document', 'docs/sar_structure_frequency_experiments.md')
+    (run / 'method_and_protocol.md').write_text(Path(protocol).read_text(encoding='utf-8'), encoding='utf-8')
     (run / 'dataset_stats.json').write_text(Path('/root/zxy/datasets/SAR-AIRcraft-1.0/COCO/stats.json').read_text(), encoding='utf-8')
 elif not Path(os.environ['INITIAL']).is_file():
     raise FileNotFoundError('Resume requires the stopped run\'s last.pth: ' + os.environ['INITIAL'])
@@ -69,6 +70,8 @@ modules = {
     'slqc_mode': cfg.get('DFINETransformer', {}).get('slqc_mode', 'layout'),
     'dsg': bool(cfg.get('HybridEncoder', {}).get('use_dsg', False)),
     'dsg_mode': cfg.get('HybridEncoder', {}).get('dsg_mode', 'directional'),
+    'mpq': bool(cfg.get('DFINETransformer', {}).get('use_mpq', False)),
+    'mpq_prototype_counts': cfg.get('DFINETransformer', {}).get('mpq_prototype_counts'),
 }
 metadata = dict(
     mode=mode, source_config=str(source), output_dir=str(run),
@@ -86,7 +89,8 @@ metadata = dict(
     amp=dict(enabled=cfg.get('use_amp'), dtype=cfg.get('amp_dtype'),
              fp32_loss=cfg.get('amp_loss_fp32'), fp32_retry=cfg.get('amp_fp32_retry'), scaler=cfg.get('scaler', {})),
     initialization=os.environ['INITIAL'], initialization_mode='COCO tuning -t; fresh optimizer' if mode == 'new' else 'restore -r from saved configuration and last.pth',
-    training_only_loss_weights={k:v for k,v in criterion.get('weight_dict', {}).items() if k.startswith('loss_scs')},
+    training_only_loss_weights={k:v for k,v in criterion.get('weight_dict', {}).items() if k.startswith(('loss_scs', 'loss_mpq'))},
+    mpq_settings={k:v for k,v in criterion.items() if k.startswith('mpq_')},
     resolved_config=cfg,
 )
 filename = 'run_metadata.json' if mode == 'new' else os.environ['ATTEMPT'] + '.metadata.json'

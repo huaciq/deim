@@ -20,6 +20,7 @@ from .sar_boundary import generate_gt_boundary_map
 from .background_rejection import SBRLoss
 from .boundary_refinement import BRLCriterion
 from .scattering_signature import SCSLoss
+from .query_prototypes import MatchedQueryPrototypeLoss
 from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
@@ -50,6 +51,10 @@ class DEIMCriterion(nn.Module):
         scs_pairs=None,
         scs_margin=0.5,
         scs_smooth_l1_beta=0.1,
+        use_mpq=False,
+        mpq_min_iou=0.7,
+        mpq_start_epoch=49,
+        mpq_ramp_epochs=5,
         ):
         """Create the criterion.
         Parameters:
@@ -87,6 +92,8 @@ class DEIMCriterion(nn.Module):
         # BRL criterion (optional)
         self.brl_criterion = BRLCriterion(loss_weight=2.0)
         self.scs_loss = SCSLoss(num_classes, scs_pairs or [], scs_margin, scs_smooth_l1_beta) if use_scs else None
+        self.mpq_loss = MatchedQueryPrototypeLoss(
+            num_classes, mpq_min_iou, mpq_start_epoch, mpq_ramp_epochs) if use_mpq else None
 
     def loss_labels_focal(self, outputs, targets, indices, num_boxes):
         assert 'pred_logits' in outputs
@@ -560,6 +567,11 @@ class DEIMCriterion(nn.Module):
             # or encoder labels enter the instance-description supervision.
             scs_losses = self.scs_loss(outputs, targets, indices)
             losses.update({name:value * self.weight_dict[name] for name, value in scs_losses.items()})
+
+        if self.mpq_loss is not None:
+            # Original final-layer matches only. The auxiliary prototype logits
+            # never replace pred_logits in matching or any detection loss.
+            losses['loss_mpq'] = self.mpq_loss(outputs, targets, indices, **kwargs) * self.weight_dict['loss_mpq']
 
         # Keep numerical failures visible to the engine before backward.
         # Replacing a NaN loss with zero does not repair its backward graph.

@@ -27,6 +27,7 @@ from .boundary_refinement import BoundaryRefinementLoss
 from .scale_aware_refinement import ScaleAwareRefinement
 from .scattering_signature import ScatteringSignatureHead
 from .scattering_layout import ScatteringLayoutQueryClassifier
+from .query_prototypes import QueryPrototypeHead
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -458,6 +459,11 @@ class DFINETransformer(nn.Module):
                  slqc_roi_size=4,
                  slqc_num_levels=2,
                  slqc_mode='layout',
+                 use_mpq=False,
+                 mpq_projection_dim=128,
+                 mpq_prototype_counts=None,
+                 mpq_prototype_temperature=0.1,
+                 mpq_class_temperature=0.1,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -618,9 +624,18 @@ class DFINETransformer(nn.Module):
                 self.slqc = ScatteringLayoutQueryClassifier(
                     hidden_dim, slqc_token_dim, slqc_roi_size, slqc_num_levels, slqc_mode)
 
+        self.mpq_head = None
+        if use_mpq:
+            final_dim = hidden_dim if num_layers <= self.eval_idx + 1 else scaled_dim
+            with torch.random.fork_rng(devices=[]):
+                self.mpq_head = QueryPrototypeHead(
+                    final_dim, num_classes, mpq_projection_dim, mpq_prototype_counts,
+                    mpq_prototype_temperature, mpq_class_temperature)
+
     def convert_to_deploy(self):
         self.scs_head = None
         self.use_scs = False
+        self.mpq_head = None
         self.dec_score_head = nn.ModuleList([nn.Identity()] * (self.eval_idx) + [self.dec_score_head[self.eval_idx]])
         self.dec_bbox_head = nn.ModuleList(
             [self.dec_bbox_head[i] if i <= self.eval_idx else nn.Identity() for i in range(len(self.dec_bbox_head))]
@@ -839,7 +854,8 @@ class DFINETransformer(nn.Module):
             self.reg_scale,
             attn_mask=attn_mask,
             dn_meta=dn_meta,
-            return_query_features=self.slqc is not None or (self.use_scs and self.training))
+            return_query_features=self.slqc is not None or
+            (self.training and (self.use_scs or self.mpq_head is not None)))
 
         out_bboxes, out_logits, out_corners, out_refs, pre_bboxes, pre_logits = decoder_results[:6]
         final_queries = decoder_results[6] if len(decoder_results) == 7 else None
@@ -890,6 +906,9 @@ class DFINETransformer(nn.Module):
 
         if self.use_scs and self.training:
             out['pred_scs'] = self.scs_head(final_queries)
+
+        if self.mpq_head is not None and self.training:
+            out.update(self.mpq_head(final_queries))
 
         # Apply SCAS (Scatter-Aware Clutter Suppression) if enabled
         if self.scas is not None:
