@@ -68,6 +68,17 @@ def _training_image_ids(targets):
             for target in targets]
 
 
+def _module_training_metrics(model):
+    """Expose residual scales without adding diagnostic tensors to the loss."""
+    module = dist_utils.de_model(model)
+    values = {}
+    for owner, name in [('encoder', 'dsg'), ('decoder', 'slqc')]:
+        branch = getattr(getattr(module, owner, None), name, None)
+        if branch is not None:
+            values[name + '_alpha'] = branch.alpha.detach().float().item()
+    return values
+
+
 def _retry_forward_fp32(model, samples, targets, state, device, epoch, step, reason):
     buffers, cpu_rng, cuda_rng = state
     with torch.no_grad():
@@ -203,6 +214,8 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
                 lr_warmup_scheduler.step()
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced)
+        branch_metrics = _module_training_metrics(model)
+        metric_logger.update(**branch_metrics)
         if 'pred_scs' in outputs:
             validity = torch.cat([target['scs_valid'] for target in targets])
             metric_logger.update(scs_valid_fraction=validity.float().mean().item() if validity.numel() else 0.0)
@@ -212,6 +225,8 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
 
         if writer and dist_utils.is_main_process() and global_step % 10 == 0:
             writer.add_scalar('Loss/total', loss_value.item(), global_step)
+            for name, value in branch_metrics.items():
+                writer.add_scalar('Module/' + name, value, global_step)
             for j, pg in enumerate(optimizer.param_groups):
                 writer.add_scalar(f'Lr/pg_{j}', pg['lr'], global_step)
             for k, v in loss_dict_reduced.items():

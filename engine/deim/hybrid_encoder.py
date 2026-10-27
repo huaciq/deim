@@ -20,6 +20,7 @@ from .adaptive_feature_selection import AdaptiveFeatureSelection
 from .scattering_pattern_isolation import ScatteringPatternIsolation
 
 from ..core import register
+from .directional_subband import DirectionalSubbandGate
 
 __all__ = ['HybridEncoder']
 
@@ -360,6 +361,9 @@ class HybridEncoder(nn.Module):
                  use_afs=False,
                  afs_scales=[1, 2, 3],
                  use_spi=False,
+                 use_dsg=False,
+                 dsg_bottleneck=64,
+                 dsg_mode='directional',
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -484,6 +488,13 @@ class HybridEncoder(nn.Module):
 
         self._reset_parameters()
 
+        # Add the adapter only after all original layers were initialized.
+        # Keep subsequent decoder/data RNG identical for the fixed seed.
+        self.dsg = None
+        if use_dsg:
+            with torch.random.fork_rng(devices=[]):
+                self.dsg = DirectionalSubbandGate(hidden_dim, dsg_bottleneck, dsg_mode)
+
     def _reset_parameters(self):
         if self.eval_spatial_size:
             for idx in self.use_encoder_idx:
@@ -563,6 +574,10 @@ class HybridEncoder(nn.Module):
             # Store for visualization and optional supervision
             spi_outputs['scatter_probs'] = scatter_probs
             spi_outputs['target_similarity'] = target_sim
+
+        if self.dsg is not None:
+            # Projected stride-8 only; no extra P2 or changed output scales.
+            proj_feats[0] = self.dsg(proj_feats[0])
 
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]

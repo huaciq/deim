@@ -1,0 +1,7 @@
+# Ablation: share the high-frequency gate instead of directional gates.
+__include__: ['./dsg.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_dsg_shared_102e_b28/seed0
+
+HybridEncoder:
+  dsg_mode: shared

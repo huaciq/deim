@@ -1,0 +1,14 @@
+# Inherit complete M1 supervision, then add SLQC only.
+__include__: ['../deim_hgnetv2_m_sar_aircraft_scs_m1_102e_b28.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_scs_slqc_102e_b28/seed0
+
+HybridEncoder:
+  use_dsg: False
+
+DFINETransformer:
+  use_slqc: True
+  slqc_token_dim: 64
+  slqc_roi_size: 4
+  slqc_num_levels: 2
+  slqc_mode: layout

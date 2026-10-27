@@ -1,0 +1,7 @@
+# Ablation: retain only the low-frequency residual branch.
+__include__: ['./dsg.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_dsg_ll_only_102e_b28/seed0
+
+HybridEncoder:
+  dsg_mode: ll_only

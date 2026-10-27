@@ -1,0 +1,12 @@
+# Inherit complete M1 supervision, then add DSG only.
+__include__: ['../deim_hgnetv2_m_sar_aircraft_scs_m1_102e_b28.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_scs_dsg_102e_b28/seed0
+
+DFINETransformer:
+  use_slqc: False
+
+HybridEncoder:
+  use_dsg: True
+  dsg_bottleneck: 64
+  dsg_mode: directional

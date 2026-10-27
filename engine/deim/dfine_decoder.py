@@ -26,6 +26,7 @@ from .background_rejection import SimpleBackgroundRejection
 from .boundary_refinement import BoundaryRefinementLoss
 from .scale_aware_refinement import ScaleAwareRefinement
 from .scattering_signature import ScatteringSignatureHead
+from .scattering_layout import ScatteringLayoutQueryClassifier
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -452,6 +453,11 @@ class DFINETransformer(nn.Module):
                  sar_fp32_ops=True,
                  use_scs=False,
                  scs_hidden_dim=128,
+                 use_slqc=False,
+                 slqc_token_dim=64,
+                 slqc_roi_size=4,
+                 slqc_num_levels=2,
+                 slqc_mode='layout',
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -601,6 +607,16 @@ class DFINETransformer(nn.Module):
             # or the seed's subsequent data/denoising random sequence.
             with torch.random.fork_rng(devices=[]):
                 self.scs_head = ScatteringSignatureHead(final_dim, scs_hidden_dim)
+
+        self.slqc = None
+        if use_slqc:
+            if layer_scale != 1:
+                raise ValueError('SLQC currently requires layer_scale=1, as in the frozen DEIM-M protocol.')
+            if slqc_num_levels > num_levels:
+                raise ValueError('SLQC cannot sample more feature levels than the decoder receives.')
+            with torch.random.fork_rng(devices=[]):
+                self.slqc = ScatteringLayoutQueryClassifier(
+                    hidden_dim, slqc_token_dim, slqc_roi_size, slqc_num_levels, slqc_mode)
 
     def convert_to_deploy(self):
         self.scs_head = None
@@ -823,10 +839,10 @@ class DFINETransformer(nn.Module):
             self.reg_scale,
             attn_mask=attn_mask,
             dn_meta=dn_meta,
-            return_query_features=self.use_scs and self.training)
+            return_query_features=self.slqc is not None or (self.use_scs and self.training))
 
         out_bboxes, out_logits, out_corners, out_refs, pre_bboxes, pre_logits = decoder_results[:6]
-        final_queries = decoder_results[6] if self.use_scs and self.training else None
+        final_queries = decoder_results[6] if len(decoder_results) == 7 else None
 
         if self.training and dn_meta is not None:
             # the output from the first decoder layer, only one
@@ -841,6 +857,27 @@ class DFINETransformer(nn.Module):
             if final_queries is not None:
                 _, final_queries = torch.split(final_queries, dn_meta['dn_num_split'], dim=1)
 
+        localization_teacher_logits = out_logits[-1]
+        if self.slqc is not None:
+            # Reuse the projected encoder memory. These are views, not B*Q
+            # copies of full maps. Sampling boxes are detached inside SLQC.
+            batch, _, channels = memory.shape
+            local_features, offset = [], 0
+            for height, width in spatial_shapes[:self.slqc.num_levels]:
+                height, width = int(height), int(width)
+                count = height * width
+                feature = memory[:, offset:offset + count].transpose(1, 2)
+                local_features.append(feature.reshape(batch, channels, height, width))
+                offset += count
+            delta_query = self.slqc(final_queries, out_bboxes[-1], local_features)
+            score_index = self.num_layers - 1 if self.training else self.eval_idx
+            # Reuse the original classifier and preserve its bias and the
+            # already-added LQE quality score. Only final ordinary logits
+            # change; bbox/FDR, DN, encoder and shallow aux paths stay intact.
+            residual_logits = F.linear(delta_query, self.dec_score_head[score_index].weight, bias=None)
+            final_logits = out_logits[-1] + residual_logits
+            out_logits = torch.cat((out_logits[:-1], final_logits.unsqueeze(0)), dim=0)
+
 
         if self.training:
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1], 'pred_corners': out_corners[-1],
@@ -851,7 +888,7 @@ class DFINETransformer(nn.Module):
                    'pred_corners': out_corners[-1], 'ref_points': out_refs[-1],
                    'up': self.up, 'reg_scale': self.reg_scale}
 
-        if final_queries is not None:
+        if self.use_scs and self.training:
             out['pred_scs'] = self.scs_head(final_queries)
 
         # Apply SCAS (Scatter-Aware Clutter Suppression) if enabled
@@ -988,7 +1025,7 @@ class DFINETransformer(nn.Module):
 
         if self.training and self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss2(out_logits[:-1], out_bboxes[:-1], out_corners[:-1], out_refs[:-1],
-                                                     out_corners[-1], out_logits[-1])
+                                                     out_corners[-1], localization_teacher_logits)
             out['enc_aux_outputs'] = self._set_aux_loss(enc_topk_logits_list, enc_topk_bboxes_list)
             out['pre_outputs'] = {'pred_logits': pre_logits, 'pred_boxes': pre_bboxes}
             out['enc_meta'] = {'class_agnostic': self.query_select_method == 'agnostic'}

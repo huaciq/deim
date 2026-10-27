@@ -1,0 +1,9 @@
+# Combine the two inference-time branches without SCS supervision.
+__include__: ['./slqc.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_slqc_dsg_102e_b28/seed0
+
+HybridEncoder:
+  use_dsg: True
+  dsg_bottleneck: 64
+  dsg_mode: directional

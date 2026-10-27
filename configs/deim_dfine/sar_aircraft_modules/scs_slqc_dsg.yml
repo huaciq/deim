@@ -1,0 +1,9 @@
+# Complete SCS + SLQC + DSG. Compare independent mechanisms before this run.
+__include__: ['./scs_slqc.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_scs_slqc_dsg_102e_b28/seed0
+
+HybridEncoder:
+  use_dsg: True
+  dsg_bottleneck: 64
+  dsg_mode: directional

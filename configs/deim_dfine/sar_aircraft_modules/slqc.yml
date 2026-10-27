@@ -1,0 +1,15 @@
+# Baseline + scattering-layout-guided query classification.
+__include__: ['../deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_slqc_102e_b28/seed0
+
+HybridEncoder:
+  use_dsg: False
+
+DFINETransformer:
+  use_scs: False
+  use_slqc: True
+  slqc_token_dim: 64
+  slqc_roi_size: 4
+  slqc_num_levels: 2
+  slqc_mode: layout

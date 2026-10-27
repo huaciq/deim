@@ -1,0 +1,7 @@
+# Control: spatial residual/gating without frequency decomposition.
+__include__: ['./dsg.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_dsg_spatial_102e_b28/seed0
+
+HybridEncoder:
+  dsg_mode: spatial

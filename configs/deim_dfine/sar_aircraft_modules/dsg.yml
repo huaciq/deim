@@ -1,0 +1,13 @@
+# Baseline + directional subband gating. Frozen M protocol is inherited.
+__include__: ['../deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_dsg_102e_b28/seed0
+
+DFINETransformer:
+  use_scs: False
+  use_slqc: False
+
+HybridEncoder:
+  use_dsg: True
+  dsg_bottleneck: 64
+  dsg_mode: directional

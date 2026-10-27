@@ -1,0 +1,7 @@
+# Ablation: local ROI attention without explicit layout encoding.
+__include__: ['./slqc.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_slqc_roi_102e_b28/seed0
+
+DFINETransformer:
+  slqc_mode: roi
