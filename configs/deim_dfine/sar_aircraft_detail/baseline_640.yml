@@ -1,0 +1,9 @@
+# B0: original baseline, changing only the network input to fixed 640x640.
+__include__: ['../deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_baseline_640_seed0
+experiment_protocol_document: docs/sar_fixed640_experiments.md
+
+train_dataloader:
+  collate_fn:
+    base_size: 640
+    base_size_repeat: null

@@ -1,0 +1,10 @@
+# B1, fixed network input 640x640 for all epochs. No batch multi-scale resize.
+# Prepared for a later decision; the first fixed-640 run is baseline_640.yml.
+__include__: ['./s2_plain.yml']
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_s2_plain_640_seed0
+experiment_protocol_document: docs/sar_fixed640_experiments.md
+
+train_dataloader:
+  collate_fn:
+    base_size: 640
+    base_size_repeat: null
