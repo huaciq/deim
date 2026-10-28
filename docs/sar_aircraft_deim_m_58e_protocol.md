@@ -147,3 +147,96 @@ grep -H -A2 "IoU=0.50:0.95 | area=   all | maxDets=100 ]" "$OUT"/test_eval/*/con
 ## 8. 后续（不在本任务内）
 
 58 轮 baseline 通过验收后，SCS 以 58 轮配置为父配置建子配置重跑。旧的 SCS 配置继承自 102 轮，不能直接复用其结果做对比。
+
+## 9. 实现记录（2026-10-28）
+
+状态更新：已实现并完成本地 CPU 定向回归；实验未启动，尚无 58 轮训练或 test 指标。
+
+- 实现 commit：`93df36b`（`main`，Add SAR-AIRcraft 58-epoch baseline protocol and regression tests）。
+  本节作为后续文档提交补记，避免在实现提交中循环引用自身 revision。
+- 新增 `configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_58e_b28.yml`：仅继承 102 轮配置，
+  覆盖七项调度值、`output_dir` 和协议归档路径。`policy.ops` 继承为
+  `['Mosaic', 'RandomPhotometricDistort']`；其余解析配置与 102 轮基线一致。
+- 新增 `tests/test_sar_58e_protocol.py`：四项回归覆盖单父继承与归档路径、七项调度与
+  `policy.ops`、其余解析配置全量一致性，以及 `flat_cosine_schedule` 的 warmup / flat /
+  no-augmentation 边界。比较时只排除七项调度、两个归档/输出字段和非运行参数 `__include__`。
+- Windows Conda `pytorch` 环境运行结果：**4 tests passed，OK**，测试主体耗时 0.129 秒。
+  step 432 / 3132 为 `3.5e-4`，step 5400 / 5401 / 6263 / 6264 为 `1.75e-4`；
+  同时核对 step 0 和平方 warmup 中点 step 216。
+- 验证仅解析配置和计算 LR，不实例化检测器、不加载数据或权重、不启动训练；
+  未进行哈希校验或冒烟测试。未修改 solver、模型、损失、数据、旧配置或旧协议。
+- 现有 `tools/run_sar_module_experiment.sh` 已读取 `experiment_protocol_document` 并归档为
+  `method_and_protocol.md`，无需修改启动器。本次沿用本文明确指定的 `/root/zxy/...` 路径。
+  数据继续使用原 COCO 标注，无需重新准备。
+
+本地复现命令（PowerShell）：
+
+```powershell
+$env:CUDA_VISIBLE_DEVICES = ''
+conda run --no-capture-output -n pytorch python -m unittest discover -s tests -p test_sar_58e_protocol.py -v
+```
+
+服务器更新、两卡启动和恢复命令见第 7 节，均仅交接，未远程执行。
+启动器使用新建目录，保存解析配置、Git revision、seed、全局 batch、输入尺寸、
+优化器与调度、增强、EMA、AMP、初始化权重和评估口径，并以
+`nohup ... > console.log 2>&1 < /dev/null &` 启动，保存 `$!` 后 `disown`。
+服务器工作区有修改或与远端分叉时先检查，保留已有 OGSOD 配置。
+
+重连后监控和查看逐轮指标（先将 `OUT` 改为启动器打印的实际目录；恢复训练时也显式重设）：
+
+```bash
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
+conda activate deim_zxy
+export OUT=/root/zxy/experiments/替换为实际目录
+tail -f "$OUT/console.log"
+# 恢复时启动器打印新的 resume_*.console.log，改为跟踪该日志。
+ps -p "$(cat "$OUT/launcher.pid")" -o pid,ppid,etime,args
+nvidia-smi -i 0,1
+tail -n 3 "$OUT/log.txt"
+python - "$OUT/log.txt" <<'PY'
+import json, sys
+from pathlib import Path
+rows = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines() if line.startswith('{')]
+for row in rows[-3:]:
+    values = row['test_coco_eval_bbox']
+    print('val epoch', row['epoch'], dict(zip(['AP', 'AP50', 'AP75', 'AR100'],
+          [round(values[i] * 100, 2) for i in [0, 1, 2, 8]])))
+PY
+tensorboard --logdir "$OUT/summary" --host 0.0.0.0 --port 6006
+```
+
+`last.pth` 正常最后为 epoch 49，用于已停止运行的恢复；它不是最终权重。
+`best_stg2.pth` 仅在实际保存时存在，第 7 节评估循环可在 `EVAL=...` 前加入
+`[ -f "$OUT/$K.pth" ] || continue` 跳过不存在的阶段权重。
+最终权重按 val AP 选择，曲线 checkpoint 的 test AP 仅用于诊断；不要按 test AP 选权重。
+
+test 评估完成后，从 `eval.pth` 提取 AP / AP50 / AP75 / AR100 与各类 AP（原始值乘 100）：
+
+```bash
+python - "$OUT" /root/zxy/datasets/SAR-AIRcraft-1.0/COCO/test.json <<'PY'
+import json, sys
+from pathlib import Path
+import numpy as np
+import torch
+
+names = {row['id']: row['name'] for row in json.loads(Path(sys.argv[2]).read_text())['categories']}
+def percent(values):
+    valid = values[values > -1]
+    return round(float(valid.mean()) * 100, 2) if valid.size else None
+
+for path in sorted((Path(sys.argv[1]) / 'test_eval').glob('*/eval.pth')):
+    result = torch.load(path, map_location='cpu', weights_only=False)
+    params = result['params']
+    area, max_dets = params.areaRngLbl.index('all'), params.maxDets.index(100)
+    precision = result['precision'][:, :, :, area, max_dets]
+    recall = result['recall'][:, :, area, max_dets]
+    metrics = dict(AP=percent(precision),
+                   AP50=percent(precision[np.isclose(params.iouThrs, .5)]),
+                   AP75=percent(precision[np.isclose(params.iouThrs, .75)]),
+                   AR100=percent(recall))
+    metrics['per_class_AP'] = {names[cat_id]: percent(precision[:, :, k])
+                               for k, cat_id in enumerate(params.catIds)}
+    print(path.parent.name, json.dumps(metrics, ensure_ascii=False))
+PY
+```
