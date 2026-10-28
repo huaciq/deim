@@ -1,0 +1,19 @@
+# Short schedule; preserve all other settings of the frozen 102-epoch baseline.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_58e_b28/seed0
+experiment_protocol_document: docs/sar_aircraft_deim_m_58e_protocol.md
+
+epoches: 58
+warmup_iter: 432  # Four epochs at 108 iterations per epoch (global batch 28).
+flat_epoch: 29
+no_aug_epoch: 8
+
+train_dataloader:
+  dataset:
+    transforms:
+      policy:
+        epoch: [4, 29, 50]
+  collate_fn:
+    mixup_epochs: [4, 29]
+    stop_epoch: 50
