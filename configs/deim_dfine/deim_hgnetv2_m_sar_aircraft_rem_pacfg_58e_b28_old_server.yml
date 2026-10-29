@@ -1,0 +1,11 @@
+# Two-factor ablation: projected stride-8 -> REM -> PACFG -> FPN.
+# Keep each adapter and the complete single-module training protocol unchanged.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_pacfg_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_pacfg_experiment.md
+
+HybridEncoder:
+  use_rem: True
+  use_pacfg: True
+  pacfg_bottleneck: 64
