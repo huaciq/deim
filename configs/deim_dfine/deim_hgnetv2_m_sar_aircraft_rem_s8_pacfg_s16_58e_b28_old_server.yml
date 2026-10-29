@@ -1,0 +1,9 @@
+# Placement ablation: REM on projected stride-8, PACFG on projected stride-16.
+# Both outputs enter the existing FPN; adapter internals and training stay fixed.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_pacfg_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_s8_pacfg_s16_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_pacfg_split_experiment.md
+
+HybridEncoder:
+  pacfg_feat_index: 1

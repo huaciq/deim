@@ -376,6 +376,7 @@ class HybridEncoder(nn.Module):
                  pacfg_bottleneck=64,
                  use_pafp=False,
                  pafp_bottleneck=64,
+                 pacfg_feat_index=0,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -525,7 +526,10 @@ class HybridEncoder(nn.Module):
                 self.rem = RadarEnhancementModule(hidden_dim, act=act)
 
         self.pacfg = None
+        self.pacfg_feat_index = pacfg_feat_index
         if use_pacfg:
+            if not 0 <= pacfg_feat_index < len(in_channels):
+                raise ValueError('pacfg_feat_index must select an encoder feature level.')
             with torch.random.fork_rng(devices=[]):
                 self.pacfg = PhaseAlignedCrossFrequencyGuidance(hidden_dim, pacfg_bottleneck)
 
@@ -628,7 +632,9 @@ class HybridEncoder(nn.Module):
             proj_feats[0] = self.rem(proj_feats[0])
 
         if self.pacfg is not None:
-            proj_feats[0] = self.pacfg(proj_feats[0])
+            # Default 0 preserves same-level REM -> PACFG; 1 uses stride-16.
+            index = self.pacfg_feat_index
+            proj_feats[index] = self.pacfg(proj_feats[index])
 
         if self.pafp is not None:
             proj_feats[0] = self.pafp(proj_feats[0])

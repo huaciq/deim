@@ -79,6 +79,7 @@ modules = {
     'rem': bool(cfg.get('HybridEncoder', {}).get('use_rem', False)),
     'pacfg': bool(cfg.get('HybridEncoder', {}).get('use_pacfg', False)),
     'pacfg_bottleneck': cfg.get('HybridEncoder', {}).get('pacfg_bottleneck', 64),
+    'pacfg_feat_index': cfg.get('HybridEncoder', {}).get('pacfg_feat_index', 0),
     'pafp': bool(cfg.get('HybridEncoder', {}).get('use_pafp', False)),
     'pafp_bottleneck': cfg.get('HybridEncoder', {}).get('pafp_bottleneck', 64),
     'crossgate_dbdm': bool(cfg.get('HGNetv2', {}).get('use_crossgate_dbdm', False)),
