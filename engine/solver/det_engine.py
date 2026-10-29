@@ -76,6 +76,9 @@ def _module_training_metrics(model):
         branch = getattr(getattr(module, owner, None), name, None)
         if branch is not None:
             values[name + '_alpha'] = branch.alpha.detach().float().item()
+    backbone = getattr(module, 'backbone', None)
+    if getattr(backbone, 'use_crossgate_dbdm', False):
+        values['crossgate_dbdm_res_scale'] = backbone.stages[1].downsample.res_scale.detach().float().item()
     detail = getattr(getattr(module, 'encoder', None), 's2_injection', None)
     if detail is not None:
         values['s2_gamma_mean_abs'] = detail.downsample.norm.weight.detach().float().abs().mean().item()

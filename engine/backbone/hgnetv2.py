@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 from .common import FrozenBatchNorm2d
+from .crossgate_dbdm import CrossGateDBDM
 from ..core import register
 import logging
 
@@ -441,10 +442,12 @@ class HGNetv2(nn.Module):
                  freeze_at=0,
                  freeze_norm=True,
                  pretrained=True,
-                 local_model_dir='weight/hgnetv2/'):
+                 local_model_dir='weight/hgnetv2/',
+                 use_crossgate_dbdm=False):
         super().__init__()
         self.use_lab = use_lab
         self.return_idx = return_idx
+        self.use_crossgate_dbdm = use_crossgate_dbdm
 
         stem_channels = self.arch_configs[name]['stem_channels']
         stage_config = self.arch_configs[name]['stage_config']
@@ -477,6 +480,14 @@ class HGNetv2(nn.Module):
                     kernel_size,
                     use_lab))
 
+        if use_crossgate_dbdm:
+            # Stage 2: stride 4 -> 8. Original conv/bn keys and RNG remain
+            # compatible with the COCO-initialized baseline.
+            with torch.random.fork_rng(devices=[]):
+                channels = stage_config['stage2'][0]
+                self.stages[1].downsample = CrossGateDBDM(
+                    channels, channels, residual=self.stages[1].downsample)
+
         if freeze_at >= 0:
             self._freeze_parameters(self.stem)
             if not freeze_stem_only:
@@ -506,7 +517,7 @@ class HGNetv2(nn.Module):
 
                     print(f"Loaded stage1 {name} HGNetV2 from URL.")
 
-                self.load_state_dict(state)
+                self.load_state_dict(state, strict=not use_crossgate_dbdm)
 
             except (Exception, KeyboardInterrupt) as e:
                 if torch.distributed.get_rank() == 0:

@@ -1,0 +1,8 @@
+# Baseline + CrossGate-DBDM at backbone stage 2 only; retain the 58e protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_crossgate_dbdm_58e_b28/seed0
+experiment_protocol_document: docs/sar_crossgate_dbdm_experiment.md
+
+HGNetv2:
+  use_crossgate_dbdm: True
