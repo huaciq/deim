@@ -76,6 +76,7 @@ modules = {
     'slqc_mode': cfg.get('DFINETransformer', {}).get('slqc_mode', 'layout'),
     'dsg': bool(cfg.get('HybridEncoder', {}).get('use_dsg', False)),
     'dsg_mode': cfg.get('HybridEncoder', {}).get('dsg_mode', 'directional'),
+    'rem': bool(cfg.get('HybridEncoder', {}).get('use_rem', False)),
     'mpq': bool(cfg.get('DFINETransformer', {}).get('use_mpq', False)),
     'mpq_prototype_counts': cfg.get('DFINETransformer', {}).get('mpq_prototype_counts'),
     's2_injection_mode': cfg.get('HybridEncoder', {}).get('s2_injection_mode'),

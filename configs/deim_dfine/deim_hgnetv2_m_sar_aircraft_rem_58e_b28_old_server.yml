@@ -1,0 +1,8 @@
+# Baseline + REM only; keep the complete old-server 58-epoch protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_experiment.md
+
+HybridEncoder:
+  use_rem: True

@@ -22,6 +22,7 @@ from .scattering_pattern_isolation import ScatteringPatternIsolation
 from ..core import register
 from .directional_subband import DirectionalSubbandGate
 from .shallow_detail import ShallowDetailInjection
+from .radar_enhancement import RadarEnhancementModule
 
 __all__ = ['HybridEncoder']
 
@@ -368,6 +369,7 @@ class HybridEncoder(nn.Module):
                  s2_injection_mode=None,
                  s2_channels=None,
                  s2_strip_kernel=19,
+                 use_rem=False,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -511,6 +513,11 @@ class HybridEncoder(nn.Module):
                 self.s2_injection = ShallowDetailInjection(
                     s2_channels, hidden_dim, s2_injection_mode, s2_strip_kernel)
 
+        self.rem = None
+        if use_rem:
+            with torch.random.fork_rng(devices=[]):
+                self.rem = RadarEnhancementModule(hidden_dim, act=act)
+
     def _reset_parameters(self):
         if self.eval_spatial_size:
             for idx in self.use_encoder_idx:
@@ -600,6 +607,9 @@ class HybridEncoder(nn.Module):
         if self.dsg is not None:
             # Projected stride-8 only; no extra P2 or changed output scales.
             proj_feats[0] = self.dsg(proj_feats[0])
+
+        if self.rem is not None:
+            proj_feats[0] = self.rem(proj_feats[0])
 
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]
