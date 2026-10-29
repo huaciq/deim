@@ -78,6 +78,11 @@ def _module_training_metrics(model):
         if branch is not None:
             values[name + '_alpha'] = branch.alpha.detach().float().item()
     backbone = getattr(module, 'backbone', None)
+    decoder = getattr(getattr(module, 'decoder', None), 'decoder', None)
+    for index, lqe in enumerate(getattr(decoder, 'lqe_layers', ())):
+        clcr = getattr(lqe, 'clcr', None)
+        if clcr is not None:
+            values[f'clcr_beta_l{index}'] = clcr.beta.detach().float().item()
     if getattr(backbone, 'use_crossgate_dbdm', False):
         values['crossgate_dbdm_res_scale'] = backbone.stages[1].downsample.res_scale.detach().float().item()
     detail = getattr(getattr(module, 'encoder', None), 's2_injection', None)

@@ -1,0 +1,8 @@
+# Independent combined run; inherit CLCR's identical 58-epoch protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_clcr_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_pgd_rem_clcr_58e_b28/seed0
+
+HybridEncoder:
+  use_pgd_rem: True
+  pgd_rem_prior_channels: 64

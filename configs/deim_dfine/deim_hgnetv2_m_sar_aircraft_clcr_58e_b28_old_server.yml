@@ -1,0 +1,9 @@
+# CLCR only: competition + core/perimeter evidence + existing LQE statistics.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_clcr_58e_b28/seed0
+experiment_protocol_document: docs/sar_clcr_experiment.md
+
+DFINETransformer:
+  use_clcr: True
+  clcr_hidden_dim: 64

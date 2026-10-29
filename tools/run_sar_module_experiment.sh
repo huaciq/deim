@@ -74,6 +74,8 @@ modules = {
     'scs': bool(cfg.get('DFINETransformer', {}).get('use_scs', False)),
     'slqc': bool(cfg.get('DFINETransformer', {}).get('use_slqc', False)),
     'slqc_mode': cfg.get('DFINETransformer', {}).get('slqc_mode', 'layout'),
+    'clcr': bool(cfg.get('DFINETransformer', {}).get('use_clcr', False)),
+    'clcr_hidden_dim': cfg.get('DFINETransformer', {}).get('clcr_hidden_dim', 64),
     'dsg': bool(cfg.get('HybridEncoder', {}).get('use_dsg', False)),
     'dsg_mode': cfg.get('HybridEncoder', {}).get('dsg_mode', 'directional'),
     'rem': bool(cfg.get('HybridEncoder', {}).get('use_rem', False)),
