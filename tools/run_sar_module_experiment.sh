@@ -2,18 +2,23 @@
 # Explicit, one-time launch. It never queues, waits for GPUs, or stops jobs.
 # Usage: bash tools/run_sar_module_experiment.sh CONFIG
 #        bash tools/run_sar_module_experiment.sh --resume RUN
+# Optional new-run paths: EXPERIMENT_ROOT and INITIAL_WEIGHTS.
 set -e
-cd /root/zxy/deim
-source /opt/miniconda3/etc/profile.d/conda.sh
+REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$REPO_ROOT"
+CONDA_BASE=$(conda info --base)
+source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate deim_zxy
 
 if [ "$#" -eq 1 ] && [ "$1" != "--resume" ]; then
     MODE=new
     CONFIG=$1
-    INITIAL=/root/zxy/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth
+    INITIAL=${INITIAL_WEIGHTS:-/root/zxy/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth}
+    EXPERIMENT_ROOT=${EXPERIMENT_ROOT:-/root/zxy/experiments}
+    mkdir -p "$EXPERIMENT_ROOT"
     NAME=$(basename "$CONFIG")
     NAME=${NAME%.*}
-    OUT=$(mktemp -d "/root/zxy/experiments/deim_m_sar_aircraft_${NAME}_seed0_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)_XXXXXX")
+    OUT=$(mktemp -d "$EXPERIMENT_ROOT/deim_m_sar_aircraft_${NAME}_seed0_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)_XXXXXX")
     ATTEMPT=new
     LOG="$OUT/console.log"
     GATE="$OUT/gpu_gate.json"
@@ -31,7 +36,7 @@ else
     printf '%s\n' 'Usage: run_sar_module_experiment.sh CONFIG | --resume RUN' >&2
     exit 2
 fi
-export MODE CONFIG INITIAL OUT ATTEMPT LOG GATE COMMAND
+export MODE CONFIG INITIAL OUT ATTEMPT LOG GATE COMMAND REPO_ROOT CONDA_BASE
 
 python - <<'PY'
 import json
@@ -57,7 +62,8 @@ if mode == 'new':
     (run / 'git_worktree_status.txt').write_text(subprocess.check_output(['git', 'status', '--short'], text=True), encoding='utf-8')
     protocol = cfg.get('experiment_protocol_document', 'docs/sar_structure_frequency_experiments.md')
     (run / 'method_and_protocol.md').write_text(Path(protocol).read_text(encoding='utf-8'), encoding='utf-8')
-    (run / 'dataset_stats.json').write_text(Path('/root/zxy/datasets/SAR-AIRcraft-1.0/COCO/stats.json').read_text(), encoding='utf-8')
+    stats = Path(cfg['train_dataloader']['dataset']['ann_file']).with_name('stats.json')
+    (run / 'dataset_stats.json').write_text(stats.read_text(), encoding='utf-8')
 elif not Path(os.environ['INITIAL']).is_file():
     raise FileNotFoundError('Resume requires the stopped run\'s last.pth: ' + os.environ['INITIAL'])
 
@@ -143,8 +149,10 @@ arguments = [
     '--output-dir', os.environ['OUT'], '--summary-dir', str(Path(os.environ['OUT']) / 'summary'),
 ]
 script = '\n'.join([
-    '#!/usr/bin/env bash', 'set -e', 'cd /root/zxy/deim',
-    'source /opt/miniconda3/etc/profile.d/conda.sh', 'conda activate deim_zxy',
+    '#!/usr/bin/env bash', 'set -e',
+    'cd ' + shlex.quote(os.environ['REPO_ROOT']),
+    'source ' + shlex.quote(str(Path(os.environ['CONDA_BASE']) / 'etc/profile.d/conda.sh')),
+    'conda activate deim_zxy',
     'ulimit -Sn 65535',
     'exec env CUDA_VISIBLE_DEVICES=0,1 PYTHONUNBUFFERED=1 ' + shlex.join(arguments), '',
 ])

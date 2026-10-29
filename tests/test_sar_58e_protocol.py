@@ -70,6 +70,18 @@ class Sar58eProtocolTests(unittest.TestCase):
         self.assertEqual(without_protocol_overrides(self.config),
                          without_protocol_overrides(self.baseline))
 
+    def test_old_server_variant_preserves_complete_training_protocol(self):
+        config = load_config(str(CONFIG_DIR / 'deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml'), {})
+        expected = copy.deepcopy(self.config)
+        expected['output_dir'] = '/home/zxy/sar/experiments/deim_m_sar_aircraft_58e_b28/seed0'
+        for loader, split in [('train_dataloader', 'train'), ('val_dataloader', 'val')]:
+            dataset = expected[loader]['dataset']
+            dataset['img_folder'] = '/home/zxy/sar/datasets/SAR-AIRcraft-1.0'
+            dataset['ann_file'] = f'/home/zxy/sar/datasets/SAR-AIRcraft-1.0/COCO/{split}.json'
+        config.pop('__include__', None)
+        expected.pop('__include__', None)
+        self.assertEqual(config, expected)
+
     def test_flat_cosine_boundaries_at_108_iterations_per_epoch(self):
         config = self.config
         iter_per_epoch = 108
