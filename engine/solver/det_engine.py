@@ -72,7 +72,8 @@ def _module_training_metrics(model):
     """Expose residual scales without adding diagnostic tensors to the loss."""
     module = dist_utils.de_model(model)
     values = {}
-    for owner, name in [('encoder', 'dsg'), ('encoder', 'rem'), ('encoder', 'pacfg'), ('decoder', 'slqc')]:
+    for owner, name in [('encoder', 'dsg'), ('encoder', 'rem'), ('encoder', 'pacfg'),
+                        ('encoder', 'pafp'), ('decoder', 'slqc')]:
         branch = getattr(getattr(module, owner, None), name, None)
         if branch is not None:
             values[name + '_alpha'] = branch.alpha.detach().float().item()
