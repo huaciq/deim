@@ -82,6 +82,8 @@ modules = {
     'pacfg_feat_index': cfg.get('HybridEncoder', {}).get('pacfg_feat_index', 0),
     'pafp': bool(cfg.get('HybridEncoder', {}).get('use_pafp', False)),
     'pafp_bottleneck': cfg.get('HybridEncoder', {}).get('pafp_bottleneck', 64),
+    'pgd_rem': bool(cfg.get('HybridEncoder', {}).get('use_pgd_rem', False)),
+    'pgd_rem_prior_channels': cfg.get('HybridEncoder', {}).get('pgd_rem_prior_channels', 64),
     'crossgate_dbdm': bool(cfg.get('HGNetv2', {}).get('use_crossgate_dbdm', False)),
     'mpq': bool(cfg.get('DFINETransformer', {}).get('use_mpq', False)),
     'mpq_prototype_counts': cfg.get('DFINETransformer', {}).get('mpq_prototype_counts'),

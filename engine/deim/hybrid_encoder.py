@@ -22,7 +22,7 @@ from .scattering_pattern_isolation import ScatteringPatternIsolation
 from ..core import register
 from .directional_subband import DirectionalSubbandGate
 from .shallow_detail import ShallowDetailInjection
-from .radar_enhancement import RadarEnhancementModule
+from .radar_enhancement import RadarEnhancementModule, PriorGatedDirectionalREM
 from .phase_aligned_frequency import PhaseAlignedCrossFrequencyGuidance
 from .prior_adaptive_frequency import PriorAdaptiveFrequencyPurification
 
@@ -377,6 +377,8 @@ class HybridEncoder(nn.Module):
                  use_pafp=False,
                  pafp_bottleneck=64,
                  pacfg_feat_index=0,
+                 use_pgd_rem=False,
+                 pgd_rem_prior_channels=64,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -538,6 +540,13 @@ class HybridEncoder(nn.Module):
             with torch.random.fork_rng(devices=[]):
                 self.pafp = PriorAdaptiveFrequencyPurification(hidden_dim, pafp_bottleneck)
 
+        self.pgd_rem = None
+        if use_pgd_rem:
+            if feat_strides[0] != 8:
+                raise ValueError('PGD-REM requires a stride-8 first encoder feature.')
+            with torch.random.fork_rng(devices=[]):
+                self.pgd_rem = PriorGatedDirectionalREM(hidden_dim, pgd_rem_prior_channels, act=act)
+
     def _reset_parameters(self):
         if self.eval_spatial_size:
             for idx in self.use_encoder_idx:
@@ -638,6 +647,9 @@ class HybridEncoder(nn.Module):
 
         if self.pafp is not None:
             proj_feats[0] = self.pafp(proj_feats[0])
+
+        if self.pgd_rem is not None:
+            proj_feats[0] = self.pgd_rem(proj_feats[0])
 
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]

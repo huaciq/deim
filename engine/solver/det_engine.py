@@ -73,7 +73,7 @@ def _module_training_metrics(model):
     module = dist_utils.de_model(model)
     values = {}
     for owner, name in [('encoder', 'dsg'), ('encoder', 'rem'), ('encoder', 'pacfg'),
-                        ('encoder', 'pafp'), ('decoder', 'slqc')]:
+                        ('encoder', 'pafp'), ('encoder', 'pgd_rem'), ('decoder', 'slqc')]:
         branch = getattr(getattr(module, owner, None), name, None)
         if branch is not None:
             values[name + '_alpha'] = branch.alpha.detach().float().item()

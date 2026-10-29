@@ -7,6 +7,9 @@ The four convolution branches follow the paper. Its figure concatenates the
 subbands; this detector adapter instead uses signed Haar reconstruction and a
 zero-initialized residual scale to retain the existing encoder's feature sizes.
 This is a paper-based adaptation, not a copy of an official implementation.
+
+PGD-REM below is a separate detector variant: it keeps REM's directional
+branches and adds an LL-derived gate within the same Haar analysis/synthesis.
 """
 
 import torch
@@ -106,4 +109,55 @@ class RadarEnhancementModule(nn.Module):
         ll, lh, hl, hh = self.dwt(features)
         restored = self.idwt((self.ll(ll), self.lh(lh), self.hl(hl), self.hh(hh)),
                              features.shape[-2:])
+        return features + self.alpha.to(dtype=features.dtype) * restored.to(dtype=features.dtype)
+
+
+class LowFrequencyStructureGate(nn.Module):
+    """Compare compressed LL with a smooth prior; emit three full-width gates.
+
+    Only this side branch uses a bottleneck. The depthwise 5x5 kernel starts
+    as an averaging filter and remains learnable. Its receptive field is local
+    on LL; it is not an FFT or a whole-image global operator. The learned
+    gates are bounded in [0.5, 1.5], without a hand-coded foreground mask.
+    """
+
+    def __init__(self, channels, prior_channels=64):
+        super().__init__()
+        self.reduce = nn.Conv2d(channels, prior_channels, 1)
+        self.smooth = nn.Conv2d(
+            prior_channels, prior_channels, 5, padding=2,
+            padding_mode='replicate', groups=prior_channels, bias=False)
+        nn.init.constant_(self.smooth.weight, 1. / 25.)
+        self.gate = nn.Conv2d(2 * prior_channels, 3 * channels, 1)
+
+    def forward(self, ll):
+        compressed = self.reduce(ll)
+        prior = self.smooth(compressed)
+        comparison = torch.cat((compressed, prior - compressed), dim=1)
+        return (0.5 + torch.sigmoid(self.gate(comparison))).chunk(3, dim=1)
+
+
+class PriorGatedDirectionalREM(RadarEnhancementModule):
+    """PGD-REM: one full-channel DWT/IDWT pair and one zero-init alpha.
+
+    Reuse REM's LH (1x1 -> 1x3 -> 3x1 -> 3x3), HL (opposite axial
+    order), and HH (1x1 -> 3x3) Conv/BN/activation chains. LL_base uses
+    a plain 1x1 convolution. All four reconstruction bands keep `channels`;
+    the compressed LL branch only predicts spatial, per-channel gates.
+    """
+
+    def __init__(self, channels, prior_channels=64, act='silu'):
+        super().__init__(channels, act=act)
+        self.ll = nn.Conv2d(channels, channels, 1)
+        self.prior_gate = LowFrequencyStructureGate(channels, prior_channels)
+
+    def forward(self, features):
+        ll, lh, hl, hh = self.dwt(features)
+        gamma_lh, gamma_hl, gamma_hh = self.prior_gate(ll)
+        restored = self.idwt((
+            self.ll(ll),
+            gamma_lh * self.lh(lh),
+            gamma_hl * self.hl(hl),
+            gamma_hh * self.hh(hh),
+        ), features.shape[-2:])
         return features + self.alpha.to(dtype=features.dtype) * restored.to(dtype=features.dtype)
