@@ -1,0 +1,9 @@
+# Independent DFGF-inspired PACFG adaptation; baseline + this adapter only.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_pacfg_58e_b28/seed0
+experiment_protocol_document: docs/sar_pacfg_experiment.md
+
+HybridEncoder:
+  use_pacfg: True
+  pacfg_bottleneck: 64

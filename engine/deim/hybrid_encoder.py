@@ -23,6 +23,7 @@ from ..core import register
 from .directional_subband import DirectionalSubbandGate
 from .shallow_detail import ShallowDetailInjection
 from .radar_enhancement import RadarEnhancementModule
+from .phase_aligned_frequency import PhaseAlignedCrossFrequencyGuidance
 
 __all__ = ['HybridEncoder']
 
@@ -370,6 +371,8 @@ class HybridEncoder(nn.Module):
                  s2_channels=None,
                  s2_strip_kernel=19,
                  use_rem=False,
+                 use_pacfg=False,
+                 pacfg_bottleneck=64,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -518,6 +521,11 @@ class HybridEncoder(nn.Module):
             with torch.random.fork_rng(devices=[]):
                 self.rem = RadarEnhancementModule(hidden_dim, act=act)
 
+        self.pacfg = None
+        if use_pacfg:
+            with torch.random.fork_rng(devices=[]):
+                self.pacfg = PhaseAlignedCrossFrequencyGuidance(hidden_dim, pacfg_bottleneck)
+
     def _reset_parameters(self):
         if self.eval_spatial_size:
             for idx in self.use_encoder_idx:
@@ -610,6 +618,9 @@ class HybridEncoder(nn.Module):
 
         if self.rem is not None:
             proj_feats[0] = self.rem(proj_feats[0])
+
+        if self.pacfg is not None:
+            proj_feats[0] = self.pacfg(proj_feats[0])
 
         # broadcasting and fusion
         inner_outs = [proj_feats[-1]]
