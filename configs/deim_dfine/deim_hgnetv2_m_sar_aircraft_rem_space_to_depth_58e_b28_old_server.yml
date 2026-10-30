@@ -1,0 +1,8 @@
+# Frequency-basis control: keep all REM convolutions, replace Haar by raw phases.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_space_to_depth_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_mechanism_ablations.md
+
+HybridEncoder:
+  rem_variant: space_to_depth

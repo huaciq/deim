@@ -62,13 +62,37 @@ class HaarIDWT2D(nn.Module):
         return restored
 
 
-def _conv_norm_act(channels, kernel_size, act):
+class SpaceToDepth2D(nn.Module):
+    """Split each 2x2 block into four raw spatial phases, without mixing them."""
+
+    def forward(self, features):
+        batch, channels, height, width = features.shape
+        if height % 2 or width % 2:
+            features = F.pad(features, (0, width % 2, 0, height % 2), mode='replicate')
+        phases = F.pixel_unshuffle(features, 2)
+        return phases.reshape(batch, channels, 4, *phases.shape[-2:]).unbind(2)
+
+
+class DepthToSpace2D(nn.Module):
+    """Invert SpaceToDepth2D with the same channel/phase order and odd crop."""
+
+    def forward(self, phases, output_size=None):
+        batch, channels, height, width = phases[0].shape
+        packed = torch.stack(phases, dim=2).reshape(batch, channels * 4, height, width)
+        restored = F.pixel_shuffle(packed, 2)
+        if output_size is not None:
+            restored = restored[..., :output_size[0], :output_size[1]]
+        return restored
+
+
+def _conv_norm_act(channels, kernel_size, act, out_channels=None):
+    out_channels = channels if out_channels is None else out_channels
     if isinstance(kernel_size, int):
         kernel_size = (kernel_size, kernel_size)
     return nn.Sequential(
-        nn.Conv2d(channels, channels, kernel_size,
+        nn.Conv2d(channels, out_channels, kernel_size,
                   padding=tuple(size // 2 for size in kernel_size), bias=False),
-        nn.BatchNorm2d(channels),
+        nn.BatchNorm2d(out_channels),
         get_activation(act),
     )
 
@@ -80,10 +104,16 @@ class RadarEnhancementModule(nn.Module):
     Each branch starts with the 1x1 projection shown in the paper's Fig. 3.
     Only alpha starts at zero, so the adapter is initially an identity while
     the residual scale can learn immediately. Feature dtype is preserved.
+    Optional controls change only the analysis/synthesis basis (space_to_depth)
+    or the explicit axial strip pair (haar_square); the reported default stays
+    haar_directional.
     """
 
-    def __init__(self, channels, act='silu'):
+    def __init__(self, channels, act='silu', variant='haar_directional'):
         super().__init__()
+        if variant not in ('haar_directional', 'space_to_depth', 'haar_square'):
+            raise ValueError('REM variant must be haar_directional, space_to_depth or haar_square.')
+        self.variant = variant
         self.dwt = HaarDWT2D()
         self.idwt = HaarIDWT2D()
         self.ll = _conv_norm_act(channels, 1, act)
@@ -104,6 +134,20 @@ class RadarEnhancementModule(nn.Module):
             _conv_norm_act(channels, 3, act),
         )
         self.alpha = nn.Parameter(torch.zeros(()))
+
+        # Build the reported REM first so common tensors keep their exact
+        # initialization. The default path and state_dict remain unchanged.
+        if variant == 'space_to_depth':
+            self.dwt = SpaceToDepth2D()
+            self.idwt = DepthToSpace2D()
+        elif variant == 'haar_square':
+            # Each strip pair costs 6*C*C weights. Square 3x3 -> 1x1 costs
+            # 10*C*M, hence M ~= 3*C/5. Preserve depth and 5x5 branch RF.
+            middle = max(1, round(3 * channels / 5))
+            with torch.random.fork_rng(devices=[]):
+                for branch in (self.lh, self.hl):
+                    branch[1] = _conv_norm_act(channels, 3, act, out_channels=middle)
+                    branch[2] = _conv_norm_act(middle, 1, act, out_channels=channels)
 
     def forward(self, features):
         ll, lh, hl, hh = self.dwt(features)

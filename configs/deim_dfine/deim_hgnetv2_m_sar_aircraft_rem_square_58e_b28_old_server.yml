@@ -1,0 +1,8 @@
+# Strip-convolution control: keep Haar, depth and RF; approximately match capacity.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_square_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_mechanism_ablations.md
+
+HybridEncoder:
+  rem_variant: haar_square

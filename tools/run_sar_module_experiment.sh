@@ -87,6 +87,7 @@ modules = {
     'dsg': bool(cfg.get('HybridEncoder', {}).get('use_dsg', False)),
     'dsg_mode': cfg.get('HybridEncoder', {}).get('dsg_mode', 'directional'),
     'rem': bool(cfg.get('HybridEncoder', {}).get('use_rem', False)),
+    'rem_variant': cfg.get('HybridEncoder', {}).get('rem_variant', 'haar_directional'),
     'pacfg': bool(cfg.get('HybridEncoder', {}).get('use_pacfg', False)),
     'pacfg_bottleneck': cfg.get('HybridEncoder', {}).get('pacfg_bottleneck', 64),
     'pacfg_feat_index': cfg.get('HybridEncoder', {}).get('pacfg_feat_index', 0),
@@ -119,6 +120,17 @@ metadata = dict(
     initialization=os.environ['INITIAL'], initialization_mode='COCO tuning -t; fresh optimizer' if mode == 'new' else 'restore -r from saved configuration and last.pth',
     training_only_loss_weights={k:v for k,v in criterion.get('weight_dict', {}).items() if k.startswith(('loss_scs', 'loss_mpq', 'loss_margin', 'loss_asym_box', 'loss_wfdr'))},
     wfdr_settings={k:v for k,v in criterion.items() if k.startswith('wfdr_') or k == 'use_wfdr'},
+    rem_settings=(dict(variant=modules['rem_variant'], channels=cfg['HybridEncoder']['hidden_dim'],
+        placement='stride-8 input_proj, before FPN/PAN', alpha_initialization=0.,
+        analysis='space_to_depth' if modules['rem_variant'] == 'space_to_depth' else 'Haar',
+        synthesis='depth_to_space' if modules['rem_variant'] == 'space_to_depth' else 'inverse Haar',
+        phase_order=['top-left', 'top-right', 'bottom-left', 'bottom-right']
+                    if modules['rem_variant'] == 'space_to_depth' else None,
+        axial_pair=('3x3 C->M then 1x1 M->C' if modules['rem_variant'] == 'haar_square'
+                    else '1x3 then 3x1 / 3x1 then 1x3'),
+        square_middle_channels=max(1, round(3 * cfg['HybridEncoder']['hidden_dim'] / 5))
+                               if modules['rem_variant'] == 'haar_square' else None)
+        if modules['rem'] else None),
     ost_da_settings=(dict(version=modules['ost_da_version'], heads=cfg['DFINETransformer'].get('nhead', 8),
         levels=cfg['DFINETransformer']['num_levels'], points=cfg['DFINETransformer']['num_points'],
         head_partition='half free, half topology',

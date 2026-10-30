@@ -381,6 +381,7 @@ class HybridEncoder(nn.Module):
                  use_pgd_rem=False,
                  pgd_rem_prior_channels=64,
                  use_spi_module=False,
+                 rem_variant='haar_directional',
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -527,7 +528,7 @@ class HybridEncoder(nn.Module):
         self.rem = None
         if use_rem:
             with torch.random.fork_rng(devices=[]):
-                self.rem = RadarEnhancementModule(hidden_dim, act=act)
+                self.rem = RadarEnhancementModule(hidden_dim, act=act, variant=rem_variant)
 
         self.pacfg = None
         self.pacfg_feat_index = pacfg_feat_index
