@@ -14,13 +14,14 @@ import torchvision
 
 import copy
 
-from .dfine_utils import bbox2distance
+from .dfine_utils import bbox2distance, weighting_function
 from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou, wasserstein_distance_normalized
 from .sar_boundary import generate_gt_boundary_map
 from .background_rejection import SBRLoss
 from .boundary_refinement import BRLCriterion
 from .scattering_signature import SCSLoss
 from .query_prototypes import MatchedQueryPrototypeLoss
+from .wasserstein_fdr import WassersteinFDRLoss
 from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
@@ -59,6 +60,8 @@ class DEIMCriterion(nn.Module):
         sdcp_margin=0.2,
         sdcp_epsilon_px=1.0,
         sdcp_lambda_over=0.2,
+        use_wfdr=False,
+        wfdr_weight=0.5,
         ):
         """Create the criterion.
         Parameters:
@@ -104,6 +107,11 @@ class DEIMCriterion(nn.Module):
         self.sdcp_lambda_over = float(sdcp_lambda_over)
         if use_sdcp and (sdcp_epsilon_px <= 0 or sdcp_lambda_over < 0):
             raise ValueError('SDCP requires positive pixel tolerance and nonnegative over-width penalty.')
+        self.use_wfdr = use_wfdr
+        self.wfdr_weight = float(wfdr_weight)
+        if use_wfdr and 'loss_wfdr' not in weight_dict:
+            raise ValueError('W-FDR requires an explicit loss_wfdr entry in weight_dict (normally loss_fgl weight).')
+        self.wfdr_loss = WassersteinFDRLoss(reg_max, wfdr_weight) if use_wfdr else None
 
     def loss_sdcp_margin(self, outputs, targets, indices):
         """Mean squared probability-margin hinge on final matched ordinary queries.
@@ -299,6 +307,12 @@ class DEIMCriterion(nn.Module):
 
             losses['loss_fgl'] = self.unimodal_distribution_focal_loss(
                 pred_corners, target_corners, weight_right, weight_left, weight_targets, avg_factor=num_boxes)
+            if self.wfdr_loss is not None:
+                with torch.autocast(device_type=pred_corners.device.type, enabled=False):
+                    grid = weighting_function(self.reg_max, outputs['up'].float(), outputs['reg_scale'].float())
+                losses['loss_wfdr'] = self.wfdr_loss(
+                    pred_corners, target_corners, grid, weight_targets,
+                    weight_left=weight_left, weight_right=weight_right, avg_factor=num_boxes)
 
             if 'teacher_corners' in outputs:
                 pred_corners = outputs['pred_corners'].reshape(-1, (self.reg_max+1))

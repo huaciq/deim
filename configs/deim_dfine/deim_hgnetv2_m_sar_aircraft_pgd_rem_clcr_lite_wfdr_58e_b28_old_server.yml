@@ -1,0 +1,12 @@
+# Independent combined run from the same COCO initialization and frozen protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_wfdr_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_pgd_rem_clcr_lite_wfdr_58e_b28/seed0
+
+HybridEncoder:
+  use_pgd_rem: True
+  pgd_rem_prior_channels: 64
+
+DFINETransformer:
+  use_clcr: False
+  use_clcr_lite: True

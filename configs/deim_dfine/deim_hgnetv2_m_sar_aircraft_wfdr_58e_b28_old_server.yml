@@ -1,0 +1,11 @@
+# W-FDR only: original FGL/DFL plus lambda_w times exact nonuniform-grid W1.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_wfdr_58e_b28/seed0
+experiment_protocol_document: docs/sar_wfdr_experiment.md
+
+DEIMCriterion:
+  use_wfdr: True
+  wfdr_weight: 0.5
+  weight_dict:
+    loss_wfdr: 0.15  # Same outer scale as loss_fgl: 0.15 * (DFL + 0.5 * W1).
