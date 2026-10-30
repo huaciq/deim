@@ -1,0 +1,7 @@
+# OST-DA only, matching the attachment's 8 heads, 3 levels, 4 points/level.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_uniform4_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_ost_da_58e_b28/seed0
+
+DFINETransformer:
+  use_ost_da: True

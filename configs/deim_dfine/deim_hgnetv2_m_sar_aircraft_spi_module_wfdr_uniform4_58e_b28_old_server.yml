@@ -1,0 +1,8 @@
+# Matching sampling-allocation control for the three-method combination.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_spi_module_wfdr_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_spi_module_wfdr_uniform4_58e_b28/seed0
+experiment_protocol_document: docs/sar_ost_da_experiment.md
+
+DFINETransformer:
+  num_points: 4

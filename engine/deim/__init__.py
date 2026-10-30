@@ -12,6 +12,7 @@ from .deim import DEIM
 from .matcher import HungarianMatcher
 from .hybrid_encoder import HybridEncoder
 from .dfine_decoder import DFINETransformer
+from .orthogonal_topology_attention import OrthogonalTopologyDeformAttn
 from .rtdetrv2_decoder import RTDETRTransformerv2
 
 from .postprocessor import PostProcessor

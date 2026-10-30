@@ -1,0 +1,8 @@
+# Sampling-allocation control: same 12 points/head as [3,6,3], distributed [4,4,4].
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_uniform4_58e_b28/seed0
+experiment_protocol_document: docs/sar_ost_da_experiment.md
+
+DFINETransformer:
+  num_points: 4

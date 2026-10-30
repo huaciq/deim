@@ -28,6 +28,7 @@ from .scale_aware_refinement import ScaleAwareRefinement
 from .scattering_signature import ScatteringSignatureHead
 from .scattering_layout import ScatteringLayoutQueryClassifier
 from .query_prototypes import QueryPrototypeHead
+from .orthogonal_topology_attention import OrthogonalTopologyDeformAttn
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -163,8 +164,11 @@ class TransformerDecoderLayer(nn.Module):
                  n_levels=4,
                  n_points=4,
                  cross_attn_method='default',
-                 layer_scale=None):
+                 layer_scale=None,
+                 use_ost_da=False):
         super(TransformerDecoderLayer, self).__init__()
+        if use_ost_da and cross_attn_method != 'default':
+            raise ValueError('OST-DA requires differentiable bilinear cross attention (cross_attn_method: default).')
         if layer_scale is not None:
             dim_feedforward = round(layer_scale * dim_feedforward)
             d_model = round(layer_scale * d_model)
@@ -191,6 +195,11 @@ class TransformerDecoderLayer(nn.Module):
         self.norm3 = nn.LayerNorm(d_model)
 
         self._reset_parameters()
+
+        if use_ost_da:
+            # Preserve original layer initialization and subsequent RNG state.
+            with torch.random.fork_rng(devices=[]):
+                self.cross_attn = OrthogonalTopologyDeformAttn(d_model, n_levels, n_head, n_points)
 
     def _reset_parameters(self):
         init.xavier_uniform_(self.linear1.weight)
@@ -660,6 +669,7 @@ class DFINETransformer(nn.Module):
                  sdcp_aspect_dim=16,
                  sdcp_temperature=10.,
                  use_clcr_lite=False,
+                 use_ost_da=False,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -688,6 +698,7 @@ class DFINETransformer(nn.Module):
         assert query_select_method in ('default', 'one2many', 'agnostic'), ''
         assert cross_attn_method in ('default', 'discrete'), ''
         self.cross_attn_method = cross_attn_method
+        self.use_ost_da = use_ost_da
         self.query_select_method = query_select_method
 
         # backbone feature projection
@@ -697,9 +708,10 @@ class DFINETransformer(nn.Module):
         self.up = nn.Parameter(torch.tensor([0.5]), requires_grad=False)
         self.reg_scale = nn.Parameter(torch.tensor([reg_scale]), requires_grad=False)
         decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, \
-            activation, num_levels, num_points, cross_attn_method=cross_attn_method)
+            activation, num_levels, num_points, cross_attn_method=cross_attn_method, use_ost_da=use_ost_da)
         decoder_layer_wide = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, \
-            activation, num_levels, num_points, cross_attn_method=cross_attn_method, layer_scale=layer_scale)
+            activation, num_levels, num_points, cross_attn_method=cross_attn_method,
+            layer_scale=layer_scale, use_ost_da=use_ost_da)
         self.decoder = TransformerDecoder(hidden_dim, decoder_layer, decoder_layer_wide, num_layers, nhead,
                                           reg_max, self.reg_scale, self.up, eval_idx, layer_scale, act=activation)
       # denoising
