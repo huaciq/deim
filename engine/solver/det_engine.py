@@ -78,6 +78,9 @@ def _module_training_metrics(model):
         if branch is not None:
             values[name + '_alpha'] = branch.alpha.detach().float().item()
     backbone = getattr(module, 'backbone', None)
+    for index, adapter in enumerate(getattr(getattr(module, 'encoder', None), 'spi_modules', ())):
+        for name in ['alpha', 'beta']:
+            values[f'spi_module_{name}_p{index + 3}_mean_abs'] = getattr(adapter, name).detach().float().abs().mean().item()
     decoder = getattr(getattr(module, 'decoder', None), 'decoder', None)
     for index, lqe in enumerate(getattr(decoder, 'lqe_layers', ())):
         clcr = getattr(lqe, 'clcr', None)

@@ -25,6 +25,7 @@ from .shallow_detail import ShallowDetailInjection
 from .radar_enhancement import RadarEnhancementModule, PriorGatedDirectionalREM
 from .phase_aligned_frequency import PhaseAlignedCrossFrequencyGuidance
 from .prior_adaptive_frequency import PriorAdaptiveFrequencyPurification
+from .scattering_physics import SPIModule
 
 __all__ = ['HybridEncoder']
 
@@ -379,6 +380,7 @@ class HybridEncoder(nn.Module):
                  pacfg_feat_index=0,
                  use_pgd_rem=False,
                  pgd_rem_prior_channels=64,
+                 use_spi_module=False,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -547,6 +549,13 @@ class HybridEncoder(nn.Module):
             with torch.random.fork_rng(devices=[]):
                 self.pgd_rem = PriorGatedDirectionalREM(hidden_dim, pgd_rem_prior_channels, act=act)
 
+        self.use_spi_module = use_spi_module
+        self.spi_modules = nn.ModuleList()
+        if use_spi_module:
+            # Build after all baseline layers; preserve common weights and RNG.
+            with torch.random.fork_rng(devices=[]):
+                self.spi_modules.extend(SPIModule(hidden_dim) for _ in in_channels)
+
     def _reset_parameters(self):
         if self.eval_spatial_size:
             for idx in self.use_encoder_idx:
@@ -598,6 +607,10 @@ class HybridEncoder(nn.Module):
         else:
             assert len(feats) == len(self.in_channels)
             proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+
+        # Reconstruct every projected level before transformer/FPN processing.
+        if self.use_spi_module:
+            proj_feats = [adapter(feat) for adapter, feat in zip(self.spi_modules, proj_feats)]
 
         # encoder
         if self.num_encoder_layers > 0:

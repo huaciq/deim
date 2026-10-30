@@ -21,6 +21,7 @@ from .scatter_clutter_suppression import ScatterAwareClutterSuppression
 from .detail_preservation import DetailPreservationModule
 from .adaptive_feature_selection import AdaptiveFeatureSelection, MultiScaleEnhancement
 from .scattering_pattern_isolation import ScatteringPatternIsolation, SPILoss
+from .scattering_physics import SPIModule
 from .background_rejection import SimpleBackgroundRejection, SBRLoss
 from .boundary_refinement import BoundaryRefinementLoss, BRLCriterion
 from .scale_aware_refinement import ScaleAwareRefinement, SARLoss
