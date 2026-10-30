@@ -24,6 +24,7 @@ class DEIM(nn.Module):
         self.encoder = encoder
 
     def forward(self, x, targets=None):
+        image_size = x.shape[-2:]
         x = self.backbone(x)
 
         # Handle encoder output (may include boundary_output and/or spi_outputs)
@@ -47,7 +48,10 @@ class DEIM(nn.Module):
             x = encoder_out
 
         # Pass to decoder
-        decoder_out = self.decoder(x, targets)
+        if getattr(self.decoder, 'use_sdcp', False):
+            decoder_out = self.decoder(x, targets, image_size=image_size)
+        else:
+            decoder_out = self.decoder(x, targets)
 
         # Attach boundary_map and spi_outputs to decoder output for loss computation
         if isinstance(decoder_out, dict):

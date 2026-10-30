@@ -55,6 +55,10 @@ class DEIMCriterion(nn.Module):
         mpq_min_iou=0.7,
         mpq_start_epoch=49,
         mpq_ramp_epochs=5,
+        use_sdcp=False,
+        sdcp_margin=0.2,
+        sdcp_epsilon_px=1.0,
+        sdcp_lambda_over=0.2,
         ):
         """Create the criterion.
         Parameters:
@@ -94,6 +98,53 @@ class DEIMCriterion(nn.Module):
         self.scs_loss = SCSLoss(num_classes, scs_pairs or [], scs_margin, scs_smooth_l1_beta) if use_scs else None
         self.mpq_loss = MatchedQueryPrototypeLoss(
             num_classes, mpq_min_iou, mpq_start_epoch, mpq_ramp_epochs) if use_mpq else None
+        self.use_sdcp = use_sdcp
+        self.sdcp_margin = float(sdcp_margin)
+        self.sdcp_epsilon_px = float(sdcp_epsilon_px)
+        self.sdcp_lambda_over = float(sdcp_lambda_over)
+        if use_sdcp and (sdcp_epsilon_px <= 0 or sdcp_lambda_over < 0):
+            raise ValueError('SDCP requires positive pixel tolerance and nonnegative over-width penalty.')
+
+    def loss_sdcp_margin(self, outputs, targets, indices):
+        """Mean squared probability-margin hinge on final matched ordinary queries.
+
+        Normalize by the global positive count (not GT count or union matches).
+        The world-size factor compensates DDP's averaged gradients, including
+        a rank with zero positives. This adds one collective per training step.
+        """
+        logits = outputs['sdcp_logits']
+        idx = self._get_src_permutation_idx(indices)
+        labels = torch.cat([target['labels'][matched] for target, (_, matched) in zip(targets, indices)])
+        probabilities = logits[idx].float().sigmoid()
+        correct = probabilities.gather(1, labels[:, None]).squeeze(1)
+        mask = F.one_hot(labels, num_classes=logits.shape[-1]).bool()
+        competitor = probabilities.masked_fill(mask, -1.).amax(dim=-1)
+        penalty = F.relu(self.sdcp_margin - (correct - competitor)).square()
+        count = logits.new_tensor(float(labels.numel()), dtype=torch.float32)
+        if is_dist_available_and_initialized():
+            torch.distributed.all_reduce(count)
+        return penalty.sum() * get_world_size() / count.clamp_min(1.)
+
+    def sdcp_boundary_terms(self, src_boxes, target_boxes, image_size):
+        """Return robust per-edge penalty, FGL weights, and a GIoU tolerance weight.
+
+        The epsilon-insensitive Smooth-L1 has zero gradient within epsilon,
+        a smooth transition over the following epsilon, then unit slope.
+        Only horizontal edges receive 1+lambda_over when predicted width is
+        too large. FGL/GIoU gates are detached supervision weights.
+        """
+        source, target = src_boxes.float(), target_boxes.float()
+        size = torch.as_tensor(image_size, device=source.device, dtype=torch.float32)
+        epsilon = self.sdcp_epsilon_px / size[[1, 0, 1, 0]]
+        error = (box_cxcywh_to_xyxy(source) - box_cxcywh_to_xyxy(target)).abs()
+        excess = F.relu(error - epsilon)
+        smooth = torch.where(excess < epsilon, .5 * excess.square() / epsilon, excess - .5 * epsilon)
+        over_width = (source[:, 2] > target[:, 2]).to(source.dtype)
+        horizontal = 1. + self.sdcp_lambda_over * over_width
+        asymmetric = torch.stack((horizontal, torch.ones_like(horizontal),
+                                  horizontal, torch.ones_like(horizontal)), dim=-1)
+        tolerance = (excess.detach() / epsilon).clamp(0., 1.)
+        return smooth * asymmetric, tolerance * asymmetric, tolerance.mean(dim=-1)
 
     def loss_labels_focal(self, outputs, targets, indices, num_boxes):
         assert 'pred_logits' in outputs
@@ -182,11 +233,19 @@ class DEIMCriterion(nn.Module):
         src_boxes = outputs['pred_boxes'][idx]
         target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
         losses = {}
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
-        losses['loss_bbox'] = loss_bbox.sum() / num_boxes
+        if self.use_sdcp:
+            src_boxes, target_boxes = src_boxes.float(), target_boxes.float()
+            penalty, _, giou_tolerance = self.sdcp_boundary_terms(
+                src_boxes, target_boxes, outputs['sdcp_image_size'])
+            losses['loss_asym_box'] = penalty.sum() / num_boxes
+        else:
+            loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+            losses['loss_bbox'] = loss_bbox.sum() / num_boxes
 
         loss_giou = 1 - torch.diag(generalized_box_iou(\
             box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes)))
+        if self.use_sdcp:
+            loss_giou = loss_giou * giou_tolerance
         loss_giou = loss_giou if boxes_weight is None else loss_giou * boxes_weight
         losses['loss_giou'] = loss_giou.sum() / num_boxes
 
@@ -233,6 +292,10 @@ class DEIMCriterion(nn.Module):
             ious = torch.diag(box_iou(\
                         box_cxcywh_to_xyxy(outputs['pred_boxes'][idx]), box_cxcywh_to_xyxy(target_boxes))[0])
             weight_targets = ious.unsqueeze(-1).repeat(1, 1, 4).reshape(-1).detach()
+            if self.use_sdcp:
+                _, edge_weights, _ = self.sdcp_boundary_terms(
+                    outputs['pred_boxes'][idx], target_boxes, outputs['sdcp_image_size'])
+                weight_targets = weight_targets * edge_weights.reshape(-1)
 
             losses['loss_fgl'] = self.unimodal_distribution_focal_loss(
                 pred_corners, target_corners, weight_right, weight_left, weight_targets, avg_factor=num_boxes)
@@ -356,6 +419,15 @@ class DEIMCriterion(nn.Module):
              targets: list of dicts, such that len(targets) == batch_size.
                       The expected keys in each dict depends on the losses applied, see each loss' doc
         """
+        if self.use_sdcp:
+            # All GT-supervised box/FGL branches use the actual batch input size.
+            image_size = outputs['sdcp_image_size']
+            for group in ['aux_outputs', 'enc_aux_outputs', 'dn_outputs']:
+                for item in outputs.get(group, []):
+                    item['sdcp_image_size'] = image_size
+            for name in ['pre_outputs', 'dn_pre_outputs']:
+                if name in outputs:
+                    outputs[name]['sdcp_image_size'] = image_size
         outputs_without_aux = {k: v for k, v in outputs.items() if 'aux' not in k}
 
         # Retrieve the matching between the outputs of the last layer and the targets
@@ -395,6 +467,8 @@ class DEIMCriterion(nn.Module):
 
         # Compute all the requested losses, main loss
         losses = {}
+        if self.use_sdcp:
+            losses['loss_margin'] = self.loss_sdcp_margin(outputs, targets, indices) * self.weight_dict['loss_margin']
         for loss in self.losses:
             # TODO, indices and num_box are different from RT-DETRv2
             use_uni_set = self.use_uni_set and (loss in ['boxes', 'local'])

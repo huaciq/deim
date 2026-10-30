@@ -1,0 +1,20 @@
+# SDCP only: cosine decoder classification, positive margin, noise-tolerant boxes/FGL.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_sdcp_58e_b28/seed0
+experiment_protocol_document: docs/sar_sdcp_experiment.md
+
+DFINETransformer:
+  use_sdcp: True
+  sdcp_aspect_dim: 16
+  sdcp_temperature: 10.0
+
+DEIMCriterion:
+  use_sdcp: True
+  sdcp_margin: 0.2
+  sdcp_epsilon_px: 1.0
+  sdcp_lambda_over: 0.2
+  weight_dict:
+    loss_bbox: 0.0  # Replaced, not accumulated with the strict original L1.
+    loss_asym_box: 5.0
+    loss_margin: 0.1

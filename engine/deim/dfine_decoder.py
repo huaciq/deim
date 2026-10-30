@@ -274,7 +274,70 @@ class Integral(nn.Module):
         return x.reshape(list(shape[:-1]) + [-1])
 
 
-class CLCR(nn.Module):
+class BoxLocalEvidenceSampler(nn.Module):
+    """Shared CLCR/SDCP box-relative core and perimeter sampling geometry."""
+
+    def __init__(self):
+        super().__init__()
+        core = torch.linspace(-.375, .375, 3)
+        yy, xx = torch.meshgrid(core, core, indexing='ij')
+        inside = torch.stack((xx, yy), dim=-1).reshape(9, 2)
+        along = torch.tensor([-1. / 3., 0., 1. / 3.]) * 1.05
+        outer = torch.full_like(along, .525)
+        ring = torch.cat((
+            torch.stack((along, -outer), dim=-1),
+            torch.stack((along, outer), dim=-1),
+            torch.stack((-outer, along), dim=-1),
+            torch.stack((outer, along), dim=-1),
+        ))
+        self.register_buffer('sample_offsets', torch.cat((inside, ring)), persistent=False)
+
+    def pool_local_evidence(self, boxes, feature):
+        """Return pooled core/perimeter features [B,Q,C], preserving box gradients."""
+        with torch.autocast(device_type=feature.device.type, enabled=False):
+            reference = boxes.float()
+            points = reference[..., None, :2] + reference[..., None, 2:] * self.sample_offsets.float()
+            sampled = F.grid_sample(feature.float(), 2 * points - 1, mode='bilinear',
+                                    padding_mode='border', align_corners=False)
+            inside = sampled[..., :9].mean(-1).transpose(1, 2)
+            ring = sampled[..., 9:].mean(-1).transpose(1, 2)
+        return inside, ring
+
+
+class SDCPCosineClassifier(nn.Module):
+    """Query + pooled box core + log aspect embedding, followed by cosine logits.
+
+    Prototype rows retain the original classifier's weight key and shape for
+    COCO initialization. There is no class bias or extra residual gate. Tau is
+    a fixed configurable positive scale, not a learned amplitude shortcut.
+    """
+
+    def __init__(self, classifier_weight, feature_dim, aspect_dim=16, temperature=10., act='relu'):
+        super().__init__()
+        if temperature <= 0:
+            raise ValueError('SDCP temperature must be positive.')
+        self.weight = nn.Parameter(classifier_weight.detach().clone())
+        self.aspect_embedding = MLP(1, aspect_dim, aspect_dim, 2, act=act)
+        self.local_projection = nn.Linear(feature_dim + aspect_dim, classifier_weight.shape[1])
+        self.temperature = float(temperature)
+
+    @staticmethod
+    def log_aspect_ratio(boxes, image_size):
+        # cxcywh is normalized separately by W/H; restore their pixel ratio.
+        dimensions = boxes.float()[..., 2:] * image_size.float().flip(0)
+        return (dimensions[..., :1].clamp_min(1e-6).log()
+                - dimensions[..., 1:].clamp_min(1e-6).log())
+
+    def forward(self, queries, inside, boxes, image_size):
+        with torch.autocast(device_type=queries.device.type, enabled=False):
+            aspect = self.aspect_embedding(self.log_aspect_ratio(boxes, image_size))
+            fused = queries.float() + self.local_projection(torch.cat((inside.float(), aspect), dim=-1))
+            scores = self.temperature * F.linear(F.normalize(fused, dim=-1, eps=1e-6),
+                                                 F.normalize(self.weight.float(), dim=-1, eps=1e-6))
+        return scores.to(dtype=queries.dtype)
+
+
+class CLCR(BoxLocalEvidenceSampler):
     """Class-specific reliability residual from competition, local and edge evidence.
 
     Sampling uses the current normalized cxcywh box, nine points in its 0.75
@@ -290,19 +353,6 @@ class CLCR(nn.Module):
         # Shared across classes, with a distinct four-vector for every class.
         self.calibration = MLP(4 + 16 + edge_dim, hidden_dim, 1, 2, act=act)
         self.beta = nn.Parameter(torch.zeros(()))
-
-        core = torch.linspace(-.375, .375, 3)
-        yy, xx = torch.meshgrid(core, core, indexing='ij')
-        inside = torch.stack((xx, yy), dim=-1).reshape(9, 2)
-        along = torch.tensor([-1. / 3., 0., 1. / 3.]) * 1.05
-        outer = torch.full_like(along, .525)
-        ring = torch.cat((
-            torch.stack((along, -outer), dim=-1),
-            torch.stack((along, outer), dim=-1),
-            torch.stack((-outer, along), dim=-1),
-            torch.stack((outer, along), dim=-1),
-        ))
-        self.register_buffer('sample_offsets', torch.cat((inside, ring)), persistent=False)
 
     @staticmethod
     def competition_statistics(scores, eps=1e-6):
@@ -323,22 +373,9 @@ class CLCR(nn.Module):
             entropy = entropy / math.log(classes)
             return torch.stack((probabilities, margin, ratio, entropy.expand_as(probabilities)), dim=-1)
 
-    def pool_local_evidence(self, boxes, feature):
-        """Pool the 9 core and 12 perimeter samples; return two [B,Q,C] tensors."""
-        with torch.autocast(device_type=feature.device.type, enabled=False):
-            reference = boxes.float()
-            points = reference[..., None, :2] + reference[..., None, 2:] * self.sample_offsets.float()
-            # Normalized box coordinates use pixel centers with align_corners=False.
-            # Border extension avoids treating out-of-image samples as zero evidence.
-            sampled = F.grid_sample(feature.float(), 2 * points - 1, mode='bilinear',
-                                    padding_mode='border', align_corners=False)
-            inside = sampled[..., :9].mean(-1).transpose(1, 2)
-            ring = sampled[..., 9:].mean(-1).transpose(1, 2)
-        return inside, ring
-
-    def forward(self, scores, edge_statistics, boxes, feature):
+    def forward(self, scores, edge_statistics, boxes, feature, local_evidence=None):
         competition = self.competition_statistics(scores)
-        inside, ring = self.pool_local_evidence(boxes, feature)
+        inside, ring = self.pool_local_evidence(boxes, feature) if local_evidence is None else local_evidence
         local = self.local_mlp(torch.cat((inside, inside - ring), dim=-1))
         classes = scores.shape[-1]
         evidence = torch.cat((
@@ -360,7 +397,7 @@ class LQE(nn.Module):
         init.constant_(self.reg_conf.layers[-1].weight, 0)
         self.clcr = None
 
-    def forward(self, scores, pred_corners, boxes=None, local_feature=None):
+    def forward(self, scores, pred_corners, boxes=None, local_feature=None, local_evidence=None):
         B, L, _ = pred_corners.size()
         prob = F.softmax(pred_corners.reshape(B, L, 4, self.reg_max+1), dim=-1)
         prob_topk, _ = prob.topk(self.k, dim=-1)
@@ -370,7 +407,11 @@ class LQE(nn.Module):
         calibrated = scores + quality_score
         if self.clcr is not None:
             # Competition is computed from raw class logits, before the scalar LQE.
-            calibrated = calibrated + self.clcr(scores, edge_statistics, boxes, local_feature)
+            if local_evidence is None:
+                calibrated = calibrated + self.clcr(scores, edge_statistics, boxes, local_feature)
+            else:
+                calibrated = calibrated + self.clcr(scores, edge_statistics, boxes, local_feature,
+                                                    local_evidence=local_evidence)
         return calibrated
 
 
@@ -396,6 +437,8 @@ class TransformerDecoder(nn.Module):
                     + [copy.deepcopy(decoder_layer_wide) for _ in range(num_layers - self.eval_idx - 1)])
         self.lqe_layers = nn.ModuleList([copy.deepcopy(LQE(4, 64, 2, reg_max, act=act)) for _ in range(num_layers)])
         self.use_clcr = False
+        self.use_sdcp = False
+        self.sdcp_sampler = None
 
     def value_op(self, memory, value_proj, value_scale, memory_mask, memory_spatial_shapes):
         """
@@ -429,12 +472,13 @@ class TransformerDecoder(nn.Module):
                 attn_mask=None,
                 memory_mask=None,
                 dn_meta=None,
-                return_query_features=False):
+                return_query_features=False,
+                image_size=None):
         output = target
         output_detach = pred_corners_undetach = 0
         value = self.value_op(memory, None, None, memory_mask, spatial_shapes)
         local_feature = None
-        if self.use_clcr:
+        if self.use_clcr or self.use_sdcp:
             height, width = spatial_shapes[0]
             local_feature = memory[:, :height * width].transpose(1, 2).reshape(
                 memory.shape[0], self.hidden_dim, height, width)
@@ -466,7 +510,13 @@ class TransformerDecoder(nn.Module):
             if i == 0 :
                 # Initial bounding box predictions with inverse sigmoid refinement
                 pre_bboxes = F.sigmoid(pre_bbox_head(output) + inverse_sigmoid(ref_points_detach))
-                pre_scores = score_head[0](output)
+                if self.use_sdcp:
+                    pre_scores = None
+                    if self.training:
+                        pre_inside, _ = self.sdcp_sampler.pool_local_evidence(pre_bboxes, local_feature)
+                        pre_scores = score_head[0](output, pre_inside, pre_bboxes, image_size)
+                else:
+                    pre_scores = score_head[0](output)
                 ref_points_initial = pre_bboxes.detach()
 
             # Refine bounding box corners using FDR, integrating previous layer's corrections
@@ -474,10 +524,16 @@ class TransformerDecoder(nn.Module):
             inter_ref_bbox = distance2bbox(ref_points_initial, integral(pred_corners, project), reg_scale)
 
             if self.training or i == self.eval_idx:
-                scores = score_head[i](output)
-                if self.use_clcr:
+                if self.use_sdcp:
+                    local_evidence = self.sdcp_sampler.pool_local_evidence(inter_ref_bbox, local_feature)
+                    raw_scores = score_head[i](output, local_evidence[0], inter_ref_bbox, image_size)
+                    scores = self.lqe_layers[i](raw_scores, pred_corners, inter_ref_bbox, local_feature,
+                                                local_evidence=local_evidence)
+                elif self.use_clcr:
+                    scores = score_head[i](output)
                     scores = self.lqe_layers[i](scores, pred_corners, inter_ref_bbox, local_feature)
                 else:
+                    scores = score_head[i](output)
                     scores = self.lqe_layers[i](scores, pred_corners)
                 dec_out_logits.append(scores)
                 dec_out_bboxes.append(inter_ref_bbox)
@@ -493,7 +549,11 @@ class TransformerDecoder(nn.Module):
 
         result = (torch.stack(dec_out_bboxes), torch.stack(dec_out_logits),
                   torch.stack(dec_out_pred_corners), torch.stack(dec_out_refs), pre_bboxes, pre_scores)
-        return result + (output,) if return_query_features else result
+        if return_query_features:
+            result += (output,)
+        if self.use_sdcp and self.training:
+            result += (raw_scores,)
+        return result
 
 
 @register()
@@ -556,6 +616,9 @@ class DFINETransformer(nn.Module):
                  mpq_class_temperature=0.1,
                  use_clcr=False,
                  clcr_hidden_dim=64,
+                 use_sdcp=False,
+                 sdcp_aspect_dim=16,
+                 sdcp_temperature=10.,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -734,6 +797,18 @@ class DFINETransformer(nn.Module):
                 for lqe in self.decoder.lqe_layers:
                     lqe.clcr = CLCR(hidden_dim, 4 * (lqe.k + 1), clcr_hidden_dim, act=activation)
             self.decoder.use_clcr = True
+
+        self.use_sdcp = use_sdcp
+        if use_sdcp:
+            if num_classes < 2 or feat_strides[0] != 8:
+                raise ValueError('SDCP requires at least two classes and a stride-8 first feature.')
+            with torch.random.fork_rng(devices=[]):
+                self.dec_score_head = nn.ModuleList([
+                    SDCPCosineClassifier(head.weight, hidden_dim, sdcp_aspect_dim, sdcp_temperature, act=activation)
+                    for head in self.dec_score_head
+                ])
+            self.decoder.use_sdcp = True
+            self.decoder.sdcp_sampler = BoxLocalEvidenceSampler()
 
     def convert_to_deploy(self):
         self.scs_head = None
@@ -921,9 +996,13 @@ class DFINETransformer(nn.Module):
 
         return topk_memory, topk_logits, topk_anchors
 
-    def forward(self, feats, targets=None):
+    def forward(self, feats, targets=None, image_size=None):
         # input projection and embedding
         memory, spatial_shapes = self._get_encoder_input(feats)
+        if self.use_sdcp:
+            if image_size is None:
+                image_size = [side * self.feat_strides[0] for side in spatial_shapes[0]]
+            image_size = torch.as_tensor(image_size, dtype=torch.float32, device=memory.device)
 
         # prepare denoising training
         if self.training and self.num_denoising > 0:
@@ -943,6 +1022,7 @@ class DFINETransformer(nn.Module):
             self._get_decoder_input(memory, spatial_shapes, denoising_logits, denoising_bbox_unact)
 
         # decoder
+        need_queries = self.slqc is not None or (self.training and (self.use_scs or self.mpq_head is not None))
         decoder_results = self.decoder(
             init_ref_contents,
             init_ref_points_unact,
@@ -957,11 +1037,12 @@ class DFINETransformer(nn.Module):
             self.reg_scale,
             attn_mask=attn_mask,
             dn_meta=dn_meta,
-            return_query_features=self.slqc is not None or
-            (self.training and (self.use_scs or self.mpq_head is not None)))
+            return_query_features=need_queries,
+            image_size=image_size)
 
         out_bboxes, out_logits, out_corners, out_refs, pre_bboxes, pre_logits = decoder_results[:6]
-        final_queries = decoder_results[6] if len(decoder_results) == 7 else None
+        final_queries = decoder_results[6] if need_queries else None
+        sdcp_logits = decoder_results[-1] if self.use_sdcp and self.training else None
 
         if self.training and dn_meta is not None:
             # the output from the first decoder layer, only one
@@ -975,6 +1056,8 @@ class DFINETransformer(nn.Module):
             dn_out_refs, out_refs = torch.split(out_refs, dn_meta['dn_num_split'], dim=2)
             if final_queries is not None:
                 _, final_queries = torch.split(final_queries, dn_meta['dn_num_split'], dim=1)
+            if sdcp_logits is not None:
+                _, sdcp_logits = torch.split(sdcp_logits, dn_meta['dn_num_split'], dim=1)
 
         localization_teacher_logits = out_logits[-1]
         if self.slqc is not None:
@@ -1001,6 +1084,8 @@ class DFINETransformer(nn.Module):
         if self.training:
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1], 'pred_corners': out_corners[-1],
                    'ref_points': out_refs[-1], 'up': self.up, 'reg_scale': self.reg_scale}
+            if self.use_sdcp:
+                out.update(sdcp_logits=sdcp_logits, sdcp_image_size=image_size)
         else:
             # Diagnosis only: expose the distribution and its decoding reference.
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1],
