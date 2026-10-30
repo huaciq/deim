@@ -13,6 +13,7 @@ from .matcher import HungarianMatcher
 from .hybrid_encoder import HybridEncoder
 from .dfine_decoder import DFINETransformer
 from .orthogonal_topology_attention import OrthogonalTopologyDeformAttn
+from .symmetric_topology_attention import SymmetricOrthogonalTopologyDeformAttn
 from .rtdetrv2_decoder import RTDETRTransformerv2
 
 from .postprocessor import PostProcessor

@@ -1,0 +1,8 @@
+# OST-DA v2: mirrored axial pairs and an initially identity residual gate.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_sampling464_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_ost_da_v2_58e_b28/seed0
+
+DFINETransformer:
+  use_ost_da: True
+  ost_da_version: v2
