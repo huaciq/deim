@@ -1,0 +1,9 @@
+# CLCR-Lite: distribution/geometry calibration only; original CLCR remains available.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_clcr_lite_58e_b28/seed0
+experiment_protocol_document: docs/sar_clcr_lite_experiment.md
+
+DFINETransformer:
+  use_clcr: False
+  use_clcr_lite: True

@@ -387,6 +387,41 @@ class CLCR(BoxLocalEvidenceSampler):
         return self.beta.to(dtype=scores.dtype) * correction.to(dtype=scores.dtype)
 
 
+class CLCRLite(nn.Module):
+    """Eight distribution/geometry statistics; no image feature or spatial sampling.
+
+    Inputs per class: p, competition margin, normalized class entropy, mean/std
+    of the four LQE top-k means, log(w), log(h), log(w/h). The original LQE
+    keeps its full statistics. One 162-parameter head (including beta) is shared
+    across decoder layers and classes. Zero only the output layer: zeroing both
+    layers or combining a zero output with beta=0 would prevent useful learning.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.calibration = nn.Sequential(nn.Linear(8, 16), nn.SiLU(), nn.Linear(16, 1))
+        init.zeros_(self.calibration[-1].weight)
+        init.zeros_(self.calibration[-1].bias)
+        self.beta = nn.Parameter(torch.ones(()))
+
+    @staticmethod
+    def input_statistics(scores, edge_statistics, boxes):
+        with torch.autocast(device_type=scores.device.type, enabled=False):
+            competition = CLCR.competition_statistics(scores)[..., [0, 1, 3]]
+            # LQE packs [top-k probabilities, their mean] separately for each edge.
+            concentration = edge_statistics.float().reshape(*scores.shape[:2], 4, -1)[..., -1]
+            edge = torch.stack((concentration.mean(-1), concentration.std(-1, unbiased=False)), dim=-1)
+            log_wh = boxes.float()[..., 2:].clamp_min(1e-6).log()
+            scale = torch.cat((log_wh, log_wh[..., :1] - log_wh[..., 1:]), dim=-1)
+            geometry = torch.cat((edge, scale), dim=-1)
+            return torch.cat((competition, geometry.unsqueeze(2).expand(-1, -1, scores.shape[-1], -1)), dim=-1)
+
+    def forward(self, scores, edge_statistics, boxes):
+        evidence = self.input_statistics(scores, edge_statistics, boxes)
+        correction = self.calibration(evidence).squeeze(-1)
+        return self.beta.to(dtype=scores.dtype) * correction.to(dtype=scores.dtype)
+
+
 class LQE(nn.Module):
     def __init__(self, k, hidden_dim, num_layers, reg_max, act='relu'):
         super(LQE, self).__init__()
@@ -397,7 +432,7 @@ class LQE(nn.Module):
         init.constant_(self.reg_conf.layers[-1].weight, 0)
         self.clcr = None
 
-    def forward(self, scores, pred_corners, boxes=None, local_feature=None, local_evidence=None):
+    def forward(self, scores, pred_corners, boxes=None, local_feature=None, local_evidence=None, clcr_lite=None):
         B, L, _ = pred_corners.size()
         prob = F.softmax(pred_corners.reshape(B, L, 4, self.reg_max+1), dim=-1)
         prob_topk, _ = prob.topk(self.k, dim=-1)
@@ -412,6 +447,8 @@ class LQE(nn.Module):
             else:
                 calibrated = calibrated + self.clcr(scores, edge_statistics, boxes, local_feature,
                                                     local_evidence=local_evidence)
+        if clcr_lite is not None:
+            calibrated = calibrated + clcr_lite(scores, edge_statistics, boxes)
         return calibrated
 
 
@@ -437,6 +474,8 @@ class TransformerDecoder(nn.Module):
                     + [copy.deepcopy(decoder_layer_wide) for _ in range(num_layers - self.eval_idx - 1)])
         self.lqe_layers = nn.ModuleList([copy.deepcopy(LQE(4, 64, 2, reg_max, act=act)) for _ in range(num_layers)])
         self.use_clcr = False
+        self.use_clcr_lite = False
+        self.clcr_lite = None
         self.use_sdcp = False
         self.sdcp_sampler = None
 
@@ -528,10 +567,11 @@ class TransformerDecoder(nn.Module):
                     local_evidence = self.sdcp_sampler.pool_local_evidence(inter_ref_bbox, local_feature)
                     raw_scores = score_head[i](output, local_evidence[0], inter_ref_bbox, image_size)
                     scores = self.lqe_layers[i](raw_scores, pred_corners, inter_ref_bbox, local_feature,
-                                                local_evidence=local_evidence)
-                elif self.use_clcr:
+                                                local_evidence=local_evidence, clcr_lite=self.clcr_lite)
+                elif self.use_clcr or self.use_clcr_lite:
                     scores = score_head[i](output)
-                    scores = self.lqe_layers[i](scores, pred_corners, inter_ref_bbox, local_feature)
+                    scores = self.lqe_layers[i](scores, pred_corners, inter_ref_bbox, local_feature,
+                                                clcr_lite=self.clcr_lite)
                 else:
                     scores = score_head[i](output)
                     scores = self.lqe_layers[i](scores, pred_corners)
@@ -619,10 +659,15 @@ class DFINETransformer(nn.Module):
                  use_sdcp=False,
                  sdcp_aspect_dim=16,
                  sdcp_temperature=10.,
+                 use_clcr_lite=False,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
         assert len(feat_strides) == len(feat_channels)
+        if use_clcr and use_clcr_lite:
+            raise ValueError('CLCR and CLCR-Lite are alternative calibrators; enable only one.')
+        if use_clcr_lite and num_classes < 2:
+            raise ValueError('CLCR-Lite requires at least two competing classes.')
 
         for _ in range(num_levels - len(feat_strides)):
             feat_strides.append(feat_strides[-1] * 2)
@@ -797,6 +842,14 @@ class DFINETransformer(nn.Module):
                 for lqe in self.decoder.lqe_layers:
                     lqe.clcr = CLCR(hidden_dim, 4 * (lqe.k + 1), clcr_hidden_dim, act=activation)
             self.decoder.use_clcr = True
+
+        self.use_clcr_lite = use_clcr_lite
+        if use_clcr_lite:
+            # Shared across all LQE layers: 161 MLP parameters + one beta total.
+            # Register exactly once so state_dict-based EMA updates it once.
+            with torch.random.fork_rng(devices=[]):
+                self.decoder.clcr_lite = CLCRLite()
+            self.decoder.use_clcr_lite = True
 
         self.use_sdcp = use_sdcp
         if use_sdcp:

@@ -1,0 +1,13 @@
+# CLCR-Lite itself does not sample; SDCP still needs its own box-core evidence.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_sdcp_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_pgd_rem_clcr_lite_sdcp_58e_b28/seed0
+experiment_protocol_document: docs/sar_clcr_lite_experiment.md
+
+HybridEncoder:
+  use_pgd_rem: True
+  pgd_rem_prior_channels: 64
+
+DFINETransformer:
+  use_clcr: False
+  use_clcr_lite: True

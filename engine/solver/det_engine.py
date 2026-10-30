@@ -83,6 +83,9 @@ def _module_training_metrics(model):
         clcr = getattr(lqe, 'clcr', None)
         if clcr is not None:
             values[f'clcr_beta_l{index}'] = clcr.beta.detach().float().item()
+    clcr_lite = getattr(decoder, 'clcr_lite', None)
+    if clcr_lite is not None:
+        values['clcr_lite_beta'] = clcr_lite.beta.detach().float().item()
     if getattr(backbone, 'use_crossgate_dbdm', False):
         values['crossgate_dbdm_res_scale'] = backbone.stages[1].downsample.res_scale.detach().float().item()
     detail = getattr(getattr(module, 'encoder', None), 's2_injection', None)
