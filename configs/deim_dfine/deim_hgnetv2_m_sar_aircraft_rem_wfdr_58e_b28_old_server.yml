@@ -1,0 +1,8 @@
+# REM + W-FDR, preserving both single-method settings and the frozen 58e protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_wfdr_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_wfdr_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_wfdr_experiment.md
+
+HybridEncoder:
+  use_rem: True
