@@ -1,0 +1,8 @@
+# Method B: detach all eight evidence dimensions; enable the residual at epoch 30.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_clcr_lite_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_clcr_lite_detach30_58e_b28/seed0
+
+DFINETransformer:
+  clcr_lite_detach_inputs: True
+  clcr_lite_start_epoch: 30

@@ -68,6 +68,26 @@ def _training_image_ids(targets):
             for target in targets]
 
 
+def _clcr_lite_head(model):
+    module = dist_utils.de_model(model)
+    decoder = getattr(getattr(module, 'decoder', None), 'decoder', None)
+    return getattr(decoder, 'clcr_lite', None)
+
+
+def _set_clcr_lite_epoch(model, epoch, ema=None):
+    for owner in (model, ema.module if ema is not None else None):
+        if owner is not None:
+            head = _clcr_lite_head(owner)
+            if head is not None:
+                head.set_epoch(epoch)
+
+
+def _discard_inactive_clcr_lite_gradients(model):
+    head = _clcr_lite_head(model)
+    if head is not None:
+        head.discard_inactive_gradients()
+
+
 def _module_training_metrics(model):
     """Expose residual scales without adding diagnostic tensors to the loss."""
     module = dist_utils.de_model(model)
@@ -89,6 +109,8 @@ def _module_training_metrics(model):
     clcr_lite = getattr(decoder, 'clcr_lite', None)
     if clcr_lite is not None:
         values['clcr_lite_beta'] = clcr_lite.beta.detach().float().item()
+        if clcr_lite.start_epoch > 0:
+            values['clcr_lite_active'] = float(clcr_lite.active)
     if getattr(backbone, 'use_crossgate_dbdm', False):
         values['crossgate_dbdm_res_scale'] = backbone.stages[1].downsample.res_scale.detach().float().item()
     detail = getattr(getattr(module, 'encoder', None), 's2_injection', None)
@@ -129,6 +151,7 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
     writer :SummaryWriter = kwargs.get('writer', None)
 
     ema :ModelEMA = kwargs.get('ema', None)
+    _set_clcr_lite_epoch(model, epoch, ema)
     scaler :GradScaler = kwargs.get('scaler', None)
     lr_warmup_scheduler :Warmup = kwargs.get('lr_warmup_scheduler', None)
     amp_dtype = {'float16': torch.float16, 'bfloat16': torch.bfloat16}[
@@ -205,6 +228,7 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
 
         if scaler is not None:
             scaler.scale(loss).backward()
+            _discard_inactive_clcr_lite_gradients(model)
             if max_norm > 0:
                 scaler.unscale_(optimizer)
                 # FP16 GradScaler handles overflow by skipping the update.
@@ -218,6 +242,7 @@ def train_one_epoch(self_lr_scheduler, lr_scheduler, model: torch.nn.Module, cri
         else:
             optimizer.zero_grad()
             loss.backward()
+            _discard_inactive_clcr_lite_gradients(model)
             if max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
             optimizer.step()

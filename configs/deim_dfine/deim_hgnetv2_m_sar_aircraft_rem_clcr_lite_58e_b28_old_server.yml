@@ -1,0 +1,8 @@
+# Original end-to-end REM + CLCR-Lite control: no detach, active from epoch 0.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_clcr_lite_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_clcr_lite_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_clcr_lite_detach30_experiment.md
+
+HybridEncoder:
+  use_rem: True

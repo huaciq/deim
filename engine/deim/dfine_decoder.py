@@ -409,14 +409,49 @@ class CLCRLite(nn.Module):
     keeps its full statistics. One 162-parameter head (including beta) is shared
     across decoder layers and classes. Zero only the output layer: zeroing both
     layers or combining a zero output with beta=0 would prevent useful learning.
+    Optional input detach cuts only the correction's evidence gradient. Delayed
+    activation is synchronized by the trainer and persisted for checkpoint eval;
+    it does not freeze the detector or make calibrated matching invariant.
     """
 
-    def __init__(self):
+    def __init__(self, detach_inputs=False, start_epoch=0):
         super().__init__()
+        if not isinstance(start_epoch, int) or start_epoch < 0:
+            raise ValueError('CLCR-Lite start_epoch must be a nonnegative integer.')
+        self.detach_inputs = bool(detach_inputs)
+        self.start_epoch = start_epoch
+        self._active = start_epoch == 0
+        if start_epoch > 0:
+            # Persist activation for standalone evaluation/deploy. EMA's epoch
+            # state is synchronized explicitly, not averaged as a parameter.
+            self.register_buffer('_calibration_active', torch.tensor(False, dtype=torch.bool))
         self.calibration = nn.Sequential(nn.Linear(8, 16), nn.SiLU(), nn.Linear(16, 1))
         init.zeros_(self.calibration[-1].weight)
         init.zeros_(self.calibration[-1].bias)
         self.beta = nn.Parameter(torch.ones(()))
+
+    @property
+    def active(self):
+        return self._active
+
+    def set_epoch(self, epoch):
+        self._active = self.start_epoch == 0 or epoch >= self.start_epoch
+        if self.start_epoch > 0:
+            self._calibration_active.fill_(self._active)
+
+    def discard_inactive_gradients(self):
+        if not self.active:
+            # None also skips AdamW weight decay and moment updates; zero
+            # gradients alone would still change the normally initialized MLP.
+            for parameter in self.parameters():
+                parameter.grad = None
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                     missing_keys, unexpected_keys, error_msgs)
+        if self.start_epoch > 0:
+            self._active = bool(self._calibration_active.item())
 
     @staticmethod
     def input_statistics(scores, edge_statistics, boxes):
@@ -431,7 +466,15 @@ class CLCRLite(nn.Module):
             return torch.cat((competition, geometry.unsqueeze(2).expand(-1, -1, scores.shape[-1], -1)), dim=-1)
 
     def forward(self, scores, edge_statistics, boxes):
+        if not self.active:
+            # Keep every parameter connected for DDP(find_unused_parameters=False)
+            # while returning exactly zero. The trainer clears these gradients
+            # before the optimizer so the inactive head remains unchanged.
+            zero = sum(parameter.sum() for parameter in self.parameters()) * 0.
+            return zero.to(dtype=scores.dtype).expand_as(scores)
         evidence = self.input_statistics(scores, edge_statistics, boxes)
+        if self.detach_inputs:
+            evidence = evidence.detach()
         correction = self.calibration(evidence).squeeze(-1)
         return self.beta.to(dtype=scores.dtype) * correction.to(dtype=scores.dtype)
 
@@ -676,6 +719,8 @@ class DFINETransformer(nn.Module):
                  use_clcr_lite=False,
                  use_ost_da=False,
                  ost_da_version='v1',
+                 clcr_lite_detach_inputs=False,
+                 clcr_lite_start_epoch=0,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -868,7 +913,8 @@ class DFINETransformer(nn.Module):
             # Shared across all LQE layers: 161 MLP parameters + one beta total.
             # Register exactly once so state_dict-based EMA updates it once.
             with torch.random.fork_rng(devices=[]):
-                self.decoder.clcr_lite = CLCRLite()
+                self.decoder.clcr_lite = CLCRLite(
+                    detach_inputs=clcr_lite_detach_inputs, start_epoch=clcr_lite_start_epoch)
             self.decoder.use_clcr_lite = True
 
         self.use_sdcp = use_sdcp
