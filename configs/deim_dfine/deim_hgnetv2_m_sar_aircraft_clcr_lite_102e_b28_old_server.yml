@@ -1,0 +1,11 @@
+# Standalone CLCR-Lite under the complete frozen 102-epoch SAR baseline.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_clcr_lite_102e_b28/seed0
+experiment_protocol_document: docs/sar_clcr_lite_102e_experiment.md
+
+DFINETransformer:
+  use_clcr: False
+  use_clcr_lite: True
+  clcr_lite_detach_inputs: False
+  clcr_lite_start_epoch: 0
