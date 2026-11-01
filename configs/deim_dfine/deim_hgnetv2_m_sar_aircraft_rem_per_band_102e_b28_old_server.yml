@@ -1,0 +1,7 @@
+# Same isolated residual-scale change under the frozen 102-epoch protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_per_band_102e_b28/seed0
+
+HybridEncoder:
+  rem_residual_mode: per_band

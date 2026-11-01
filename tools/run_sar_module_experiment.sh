@@ -88,6 +88,7 @@ modules = {
     'dsg_mode': cfg.get('HybridEncoder', {}).get('dsg_mode', 'directional'),
     'rem': bool(cfg.get('HybridEncoder', {}).get('use_rem', False)),
     'rem_variant': cfg.get('HybridEncoder', {}).get('rem_variant', 'haar_directional'),
+    'rem_residual_mode': cfg.get('HybridEncoder', {}).get('rem_residual_mode', 'shared'),
     'pacfg': bool(cfg.get('HybridEncoder', {}).get('use_pacfg', False)),
     'pacfg_bottleneck': cfg.get('HybridEncoder', {}).get('pacfg_bottleneck', 64),
     'pacfg_feat_index': cfg.get('HybridEncoder', {}).get('pacfg_feat_index', 0),
@@ -122,6 +123,11 @@ metadata = dict(
     wfdr_settings={k:v for k,v in criterion.items() if k.startswith('wfdr_') or k == 'use_wfdr'},
     rem_settings=(dict(variant=modules['rem_variant'], channels=cfg['HybridEncoder']['hidden_dim'],
         placement='stride-8 input_proj, before FPN/PAN', alpha_initialization=0.,
+        residual_mode=modules['rem_residual_mode'],
+        alpha_count=4 if modules['rem_residual_mode'] == 'per_band' else 1,
+        alpha_order=['LL', 'LH', 'HL', 'HH'] if modules['rem_residual_mode'] == 'per_band' else ['shared'],
+        residual_scaling=('before synthesis, one scalar per band'
+                          if modules['rem_residual_mode'] == 'per_band' else 'after synthesis, one shared scalar'),
         analysis='space_to_depth' if modules['rem_variant'] == 'space_to_depth' else 'Haar',
         synthesis='depth_to_space' if modules['rem_variant'] == 'space_to_depth' else 'inverse Haar',
         phase_order=['top-left', 'top-right', 'bottom-left', 'bottom-right']

@@ -106,14 +106,19 @@ class RadarEnhancementModule(nn.Module):
     the residual scale can learn immediately. Feature dtype is preserved.
     Optional controls change only the analysis/synthesis basis (space_to_depth)
     or the explicit axial strip pair (haar_square); the reported default stays
-    haar_directional.
+    haar_directional. residual_mode='per_band' instead learns four scalar
+    scales in LL/LH/HL/HH order, applied before the single inverse transform.
+    Its convolution branches and initialization match the shared-scale REM.
     """
 
-    def __init__(self, channels, act='silu', variant='haar_directional'):
+    def __init__(self, channels, act='silu', variant='haar_directional', residual_mode='shared'):
         super().__init__()
         if variant not in ('haar_directional', 'space_to_depth', 'haar_square'):
             raise ValueError('REM variant must be haar_directional, space_to_depth or haar_square.')
+        if residual_mode not in ('shared', 'per_band'):
+            raise ValueError('REM residual_mode must be shared or per_band.')
         self.variant = variant
+        self.residual_mode = residual_mode
         self.dwt = HaarDWT2D()
         self.idwt = HaarIDWT2D()
         self.ll = _conv_norm_act(channels, 1, act)
@@ -133,7 +138,7 @@ class RadarEnhancementModule(nn.Module):
             _conv_norm_act(channels, 1, act),
             _conv_norm_act(channels, 3, act),
         )
-        self.alpha = nn.Parameter(torch.zeros(()))
+        self.alpha = nn.Parameter(torch.zeros(4 if residual_mode == 'per_band' else ()))
 
         # Build the reported REM first so common tensors keep their exact
         # initialization. The default path and state_dict remain unchanged.
@@ -151,8 +156,13 @@ class RadarEnhancementModule(nn.Module):
 
     def forward(self, features):
         ll, lh, hl, hh = self.dwt(features)
-        restored = self.idwt((self.ll(ll), self.lh(lh), self.hl(hl), self.hh(hh)),
-                             features.shape[-2:])
+        bands = (self.ll(ll), self.lh(lh), self.hl(hl), self.hh(hh))
+        if self.residual_mode == 'per_band':
+            bands = tuple(scale.to(dtype=band.dtype) * band
+                          for scale, band in zip(self.alpha.unbind(), bands))
+            restored = self.idwt(bands, features.shape[-2:])
+            return features + restored.to(dtype=features.dtype)
+        restored = self.idwt(bands, features.shape[-2:])
         return features + self.alpha.to(dtype=features.dtype) * restored.to(dtype=features.dtype)
 
 

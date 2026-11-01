@@ -96,7 +96,12 @@ def _module_training_metrics(model):
                         ('encoder', 'pafp'), ('encoder', 'pgd_rem'), ('decoder', 'slqc')]:
         branch = getattr(getattr(module, owner, None), name, None)
         if branch is not None:
-            values[name + '_alpha'] = branch.alpha.detach().float().item()
+            alpha = branch.alpha.detach().float()
+            if name == 'rem' and getattr(branch, 'residual_mode', 'shared') == 'per_band':
+                for band, value in zip(('ll', 'lh', 'hl', 'hh'), alpha.cpu().tolist()):
+                    values[f'rem_alpha_{band}'] = value
+            else:
+                values[name + '_alpha'] = alpha.item()
     backbone = getattr(module, 'backbone', None)
     for index, adapter in enumerate(getattr(getattr(module, 'encoder', None), 'spi_modules', ())):
         for name in ['alpha', 'beta']:
