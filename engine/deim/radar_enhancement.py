@@ -97,6 +97,26 @@ def _conv_norm_act(channels, kernel_size, act, out_channels=None):
     )
 
 
+class PointStripDualPath(nn.Module):
+    """Point projection with its identity shortcut and one axial strip branch.
+
+    Reuse the original REM's first two Conv/BN/activation blocks. The shortcut
+    starts after the 1x1 projection, so it preserves spatial support rather
+    than the unprojected subband's exact values. beta=1 enables both paths;
+    the enclosing REM's alpha=0 still makes the complete adapter an identity.
+    """
+
+    def __init__(self, point, strip):
+        super().__init__()
+        self.point = point
+        self.strip = strip
+        self.beta = nn.Parameter(torch.ones(()))
+
+    def forward(self, features):
+        point = self.point(features)
+        return point + self.beta.to(dtype=point.dtype) * self.strip(point)
+
+
 class RadarEnhancementModule(nn.Module):
     """REM with four distinct subband branches and a same-shape residual.
 
@@ -109,12 +129,14 @@ class RadarEnhancementModule(nn.Module):
     haar_directional. residual_mode='per_band' instead learns four scalar
     scales in LL/LH/HL/HH order, applied before the single inverse transform.
     Its convolution branches and initialization match the shared-scale REM.
+    variant='point_strip' instead replaces only LH/HL with a point shortcut
+    plus one 1x3 / 3x1 strip, each with its own learnable beta initialized at 1.
     """
 
     def __init__(self, channels, act='silu', variant='haar_directional', residual_mode='shared'):
         super().__init__()
-        if variant not in ('haar_directional', 'space_to_depth', 'haar_square'):
-            raise ValueError('REM variant must be haar_directional, space_to_depth or haar_square.')
+        if variant not in ('haar_directional', 'space_to_depth', 'haar_square', 'point_strip'):
+            raise ValueError('REM variant must be haar_directional, space_to_depth, haar_square or point_strip.')
         if residual_mode not in ('shared', 'per_band'):
             raise ValueError('REM residual_mode must be shared or per_band.')
         self.variant = variant
@@ -153,6 +175,12 @@ class RadarEnhancementModule(nn.Module):
                 for branch in (self.lh, self.hl):
                     branch[1] = _conv_norm_act(channels, 3, act, out_channels=middle)
                     branch[2] = _conv_norm_act(middle, 1, act, out_channels=channels)
+        elif variant == 'point_strip':
+            # Reuse the initialized point and first strip blocks. LL/HH and
+            # the random state stay identical to the reported REM, while the
+            # discarded orthogonal strip and final 3x3 have no live parameters.
+            self.lh = PointStripDualPath(self.lh[0], self.lh[1])
+            self.hl = PointStripDualPath(self.hl[0], self.hl[1])
 
     def forward(self, features):
         ll, lh, hl, hh = self.dwt(features)

@@ -133,9 +133,18 @@ metadata = dict(
         phase_order=['top-left', 'top-right', 'bottom-left', 'bottom-right']
                     if modules['rem_variant'] == 'space_to_depth' else None,
         axial_pair=('3x3 C->M then 1x1 M->C' if modules['rem_variant'] == 'haar_square'
+                    else 'point shortcut + beta * one 1x3 / one 3x1' if modules['rem_variant'] == 'point_strip'
                     else '1x3 then 3x1 / 3x1 then 1x3'),
         square_middle_channels=max(1, round(3 * cfg['HybridEncoder']['hidden_dim'] / 5))
-                               if modules['rem_variant'] == 'haar_square' else None)
+                               if modules['rem_variant'] == 'haar_square' else None,
+        point_strip=(dict(channels=cfg['HybridEncoder']['hidden_dim'], channel_split=False,
+            point='1x1 Conv/BN/activation; identity shortcut after projection',
+            lh_strip=[1, 3], hl_strip=[3, 1], strip_blocks_per_branch=1,
+            fusion='point + beta * strip(point); no post-fusion activation',
+            beta_count=2, beta_initialization=1., beta_learnable=True,
+            dwt_idwt='original Haar analysis/synthesis, one pair',
+            anti_alias_filter='unchanged; remove serial cross-axis and 3x3 spreading in LH/HL')
+            if modules['rem_variant'] == 'point_strip' else None))
         if modules['rem'] else None),
     ost_da_settings=(dict(version=modules['ost_da_version'], heads=cfg['DFINETransformer'].get('nhead', 8),
         levels=cfg['DFINETransformer']['num_levels'], points=cfg['DFINETransformer']['num_points'],

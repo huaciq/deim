@@ -102,6 +102,9 @@ def _module_training_metrics(model):
                     values[f'rem_alpha_{band}'] = value
             else:
                 values[name + '_alpha'] = alpha.item()
+            if name == 'rem' and getattr(branch, 'variant', None) == 'point_strip':
+                for band in ('lh', 'hl'):
+                    values[f'rem_beta_{band}'] = getattr(branch, band).beta.detach().float().item()
     backbone = getattr(module, 'backbone', None)
     for index, adapter in enumerate(getattr(getattr(module, 'encoder', None), 'spi_modules', ())):
         for name in ['alpha', 'beta']:

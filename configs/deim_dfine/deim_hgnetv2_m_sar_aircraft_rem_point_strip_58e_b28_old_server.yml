@@ -1,0 +1,8 @@
+# REM point-strip dual-path: change only LH/HL under the frozen 58-epoch protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_point_strip_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_point_strip_experiment.md
+
+HybridEncoder:
+  rem_variant: point_strip
