@@ -95,9 +95,13 @@ class CollectResultsTests(unittest.TestCase):
 
     def test_method_name_variants(self):
         cfg = config(HybridEncoder=dict(use_rem=True, rem_residual_mode='per_band'),
-                     DEIMCriterion=dict(use_wfdr=True, use_focal_loss=True))
-        self.assertEqual(method_name(cfg), 'rem[per_band]+wfdr')
-        self.assertEqual(method_name(config()), 'baseline')
+                     DFINETransformer=dict(use_bccq=True),
+                     DEIMCriterion=dict(use_wfdr=True, use_focal_loss=True, use_bccq=True))
+        cfg['HGNetv2'] = dict(use_lab=True)
+        self.assertEqual(method_name(cfg), 'rem[per_band]+bccq+wfdr')
+        baseline = config()
+        baseline['HGNetv2'] = dict(use_lab=True)
+        self.assertEqual(method_name(baseline), 'baseline')
 
     def test_coco_metrics_from_precision(self):
         # T=10 IoUs, R=101, K=2 classes, A=4 areas, M=3 maxDets; class 1 absent in small.

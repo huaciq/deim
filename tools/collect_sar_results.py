@@ -22,6 +22,8 @@ import yaml
 STAT_NAMES = ['AP', 'AP50', 'AP75', 'APs', 'APm', 'APl', 'AR1', 'AR10', 'AR100']
 METRICS = ['AP', 'AP50', 'AP75', 'APs', 'APm', 'APl', 'AR100']
 MODULE_SECTIONS = ['HGNetv2', 'HybridEncoder', 'DFINETransformer', 'DEIMCriterion']
+# Official detector settings, not methods: HGNetv2 learnable affine blocks and focal loss.
+BASE_SWITCHES = {'use_focal_loss', 'use_lab'}
 VARIANT_KEYS = {'use_rem': ['rem_variant', 'rem_residual_mode'], 'use_ost_da': ['ost_da_version'],
                 'use_slqc': ['slqc_mode'], 'use_dsg': ['dsg_mode']}
 NAME_PREFIXES = ['deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_', 'deim_m_sar_aircraft_',
@@ -59,10 +61,11 @@ def method_name(cfg):
     for section in MODULE_SECTIONS:
         block = cfg.get(section) or {}
         for key, value in block.items():
-            if key.startswith('use_') and value is True and key != 'use_focal_loss':
-                name = key[4:]
+            if key.startswith('use_') and value is True and key not in BASE_SWITCHES:
                 variants = [str(block[k]) for k in VARIANT_KEYS.get(key, []) if k in block]
-                parts.append(name + (f'[{",".join(variants)}]' if variants else ''))
+                name = key[4:] + (f'[{",".join(variants)}]' if variants else '')
+                if name not in parts:  # e.g. use_bccq in both decoder and criterion
+                    parts.append(name)
     s2 = (cfg.get('HybridEncoder') or {}).get('s2_injection_mode')
     if s2:
         parts.append(f's2[{s2}]')
