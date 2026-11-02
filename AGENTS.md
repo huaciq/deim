@@ -25,6 +25,8 @@ settings behind an existing reported result.
   `/root/zxy/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth`.
 - Server repository: `/home/zxy/sar/repos/deim`.
 - Git remote: `origin`, `https://github.com/huaciq/deim.git`; integration branch: `main`.
+- Work directly on `main` for all tasks. Do not create task/feature branches
+  or separate worktrees unless the user explicitly requests them.
 - Direct SSH from the development environment is unavailable. Transfer source
   changes through Git. Do not assume local edits exist on the server.
 - Server Conda environment: `deim_zxy` (`conda activate deim_zxy`).

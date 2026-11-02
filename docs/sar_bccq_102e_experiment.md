@@ -49,15 +49,15 @@ BCCQ分支1,341,956参数，整网净增1,336,559个可训练参数。
 
 ## 服务器 Git 更新与正式启动
 
-实现分支为 `codex/bccq-102e`，基于main的8eff55a。先查看服务器工作树；有改动或分叉时保留并处理，
+实验代码已合入 `main`，BCCQ基础提交为53b52fe。先查看服务器工作树；有改动或分叉时保留并处理，
 不使用reset或强制checkout。以下命令在源代码已推送后执行：
 
 ```bash
 cd /home/zxy/sar/repos/deim
 git status --short --branch
 git fetch origin
-git switch codex/bccq-102e
-git pull --ff-only origin codex/bccq-102e
+git switch main
+git pull --ff-only origin main
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate deim_zxy
 export EXPERIMENT_ROOT=/home/zxy/sar/experiments
