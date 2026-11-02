@@ -1,0 +1,10 @@
+# Standalone PACFG; frozen 102-epoch protocol and explicit new-server paths.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_pacfg_102e_b28/seed0
+experiment_protocol_document: docs/sar_pacfg_102e_experiment.md
+
+HybridEncoder:
+  use_pacfg: True
+  pacfg_bottleneck: 64
+  pacfg_feat_index: 0  # Projected stride-8 feature, before FPN/PAN.

@@ -17,6 +17,12 @@ settings behind an existing reported result.
 
 - Windows development repository: `F:\DEIM`; use PowerShell and `rg`.
 - Local Python default: Conda `pytorch` unless explicitly overridden.
+- Default to the old server for future configs and commands unless the user
+  explicitly requests the new server. A single new-server run does not change
+  this default.
+- New server (explicit requests only): repository `/root/zxy/deim`, dataset root
+  `/root/zxy/datasets`, experiment root `/root/zxy/experiments`, and COCO M weights
+  `/root/zxy/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth`.
 - Server repository: `/home/zxy/sar/repos/deim`.
 - Git remote: `origin`, `https://github.com/huaciq/deim.git`; integration branch: `main`.
 - Direct SSH from the development environment is unavailable. Transfer source
