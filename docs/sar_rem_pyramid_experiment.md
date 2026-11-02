@@ -55,6 +55,67 @@ REM+CLCR-Lite（−0.20）、REM+W-FDR（−0.47）、REM+PACFG（+0.12）都低
 
 诊断同时对 val 再跑一次（新目录，不改动已有 val 诊断输出），用来比较两个划分的缺口。
 
+### 2.1 诊断结果（2026-11-02，102 轮 baseline 与 REM）
+
+来源：服务器 `rem102_comparison_test_*` 与 `rem102_comparison_val_*` 的 report.md
+（用户下载到 `C:\project\实验记录\report\`）。导出 batch 为每卡 8，test AP 比 `--test-only` 高约 0.4
+（baseline 46.10 对 45.74），只在同一导出口径内比较。
+
+**val→test 的 AP50 下降一半来自找不到目标，一半来自型号判错。**
+
+| baseline | val | test | 下降 |
+|---|---:|---:|---:|
+| AP50（原） | 88.06 | 65.71 | −22.35 |
+| AP50（类别无关） | 91.74 | 81.85 | −9.89 |
+| AP50 缺口（型号） | 3.68 | 16.14 | +12.46 |
+
+类别无关 AP / AP75 的"缺口"在 val 上为负，因为合并成一类后按全部目标统计，而原 AP 是 7 类平均，
+两者权重不同；只有 AP50 缺口可近似当作型号损失。
+
+**型号损失集中在窄体机。** test 上定位后型号正确率（score≥0.3，IoU≥0.5）：
+
+| 类别 | test GT | test AP | val AP | test 型号正确率 | val 型号正确率 | test 定位率 | val 定位率 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Boeing737 | 550 | 23.29 | 59.76 | 0.473 | 0.895 | 0.573 | 0.794 |
+| A220 | 460 | 37.30 | 57.41 | 0.687 | 0.925 | 0.798 | 0.915 |
+| ARJ21 | 362 | 37.11 | 57.90 | 0.693 | 0.858 | 0.837 | 0.966 |
+| Boeing787 | 454 | 42.43 | 72.43 | 0.800 | 0.941 | 0.826 | 0.973 |
+| other | 1041 | 42.96 | 56.49 | 0.865 | 0.934 | 0.728 | 0.892 |
+| A320/321 | 52 | 62.08 | 75.47 | 1.000 | 1.000 | 0.981 | 0.988 |
+| A330 | 31 | 77.54 | 72.09 | 1.000 | 1.000 | 0.839 | 0.889 |
+
+test 中 Boeing737（19%）和 A220（16%）占比都高于 val（13%、13%），而这两类正是型号最容易错的。
+
+**REM 的 test 增益主要来自两个小类。** 7 类平均 +1.54 中，A320/321（+4.75，52 个 GT）与 A330（+5.33，31 个 GT）
+贡献约 +1.44；A220 +3.94；ARJ21、Boeing737、Boeing787、other 合计 −3.2 个类别点。
+REM 提高了 Boeing737（0.473→0.533）与 Boeing787（0.800→0.835）的型号正确率，但 ARJ21、Boeing787 的定位率下降。
+宏平均 AP 中每类权重相同，小类波动会放大整体结果，评估 REM-Pyramid 时同时看各类 AP。
+
+**结论：第二模块做窄体机型号判别。** 型号缺口 12.5 个 AP50 点，是最大的可回收空间。
+一个可直接检验的原因：SAR-AIRcraft 源图为 800/1000/1200/1500 正方形，全部缩放到 640，
+同一型号的输入尺寸相差最多 1.9 倍，飞机的物理尺寸线索被打乱；而 CLCR-Lite 的输入里正好有 640 空间的
+`log_w / log_h`，它在 test 上有收益。`tools/analyze_type_confusion.py` 用已有诊断目录的预测（只用 CPU）检验：
+
+- 按源图尺寸分组的 AP、类别无关 AP50、定位率、型号正确率；
+- 各类框尺寸在源图像素与 640 输入像素下的分布（IQR/中位数越小越能区分型号）；
+- 最大的型号混淆对。
+
+判读：型号正确率随源图尺寸明显变化，且源图像素下各类尺寸更集中 → 第二模块做"源图尺度感知的型号判别"
+（把预测框在源图坐标下的尺寸送入分类，作为 CLCR-Lite 的升级）；两者都不成立 → 下降来自外观/场景差异，
+改做外观特征层面的型号判别。
+
+```bash
+cd /home/zxy/sar/repos/deim
+git pull --ff-only origin main
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate deim_zxy
+python tools/analyze_type_confusion.py \
+  /data2/zxy/sar/experiments/diagnostics/替换为rem102_comparison_test目录 \
+  /data2/zxy/sar/experiments/diagnostics/替换为rem102_comparison_val目录
+```
+
+只用 CPU，不影响正在运行的 REM-Pyramid 训练。结果在每个诊断目录的 `type_confusion/report.md`。
+
 ## 3. REM-Pyramid 实现与配置
 
 `HybridEncoder.rem_feat_indices`（默认 `[0]`）选择接 REM 的投影层；索引 0/1/2 对应 stride 8/16/32。
