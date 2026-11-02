@@ -1,0 +1,9 @@
+# REM-Pyramid: original REM at stride 8 plus independent REMs at strides 16 and 32.
+# Same old-server 58-epoch protocol and REM branches; only rem_feat_indices changes.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_pyramid_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_pyramid_experiment.md
+
+HybridEncoder:
+  rem_feat_indices: [0, 1, 2]

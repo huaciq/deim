@@ -105,6 +105,14 @@ def _module_training_metrics(model):
             if name == 'rem' and getattr(branch, 'variant', None) == 'point_strip':
                 for band in ('lh', 'hl'):
                     values[f'rem_beta_{band}'] = getattr(branch, band).beta.detach().float().item()
+    # Extra REM levels: index i is projected level P(i+3), i.e. stride 2**(i+3).
+    for index, rem in getattr(getattr(module, 'encoder', None), 'rem_levels', {}).items():
+        alpha = rem.alpha.detach().float()
+        if rem.residual_mode == 'per_band':
+            for band, value in zip(('ll', 'lh', 'hl', 'hh'), alpha.cpu().tolist()):
+                values[f'rem_p{int(index) + 3}_alpha_{band}'] = value
+        else:
+            values[f'rem_p{int(index) + 3}_alpha'] = alpha.item()
     backbone = getattr(module, 'backbone', None)
     for index, adapter in enumerate(getattr(getattr(module, 'encoder', None), 'spi_modules', ())):
         for name in ['alpha', 'beta']:

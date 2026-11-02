@@ -14,11 +14,12 @@ elif [ "$#" -eq 2 ]; then
     DATA_ROOT=${DATA_ROOT:-/home/zxy/sar/datasets/SAR-AIRcraft-1.0}
     DIAGNOSIS_ROOT=${DIAGNOSIS_ROOT:-/data2/zxy/sar/experiments/diagnostics}
     mkdir -p "$DIAGNOSIS_ROOT"
-    OUT=$(mktemp -d "$DIAGNOSIS_ROOT/rem102_comparison_$(date +%Y%m%d_%H%M%S)_XXXXXX")
+    SPLIT=${SPLIT:-val}
+    OUT=$(mktemp -d "$DIAGNOSIS_ROOT/rem102_comparison_${SPLIT}_$(date +%Y%m%d_%H%M%S)_XXXXXX")
     LOG="$OUT/console.log"
-    ARGS=(run --baseline-run "$1" --rem-run "$2" --data-root "$DATA_ROOT" --output "$OUT")
+    ARGS=(run --baseline-run "$1" --rem-run "$2" --data-root "$DATA_ROOT" --output "$OUT" --split "$SPLIT")
 else
-    printf '%s\n' 'Usage: run_rem_102e_diagnosis.sh BASELINE_RUN REM_RUN | --resume OUT' >&2
+    printf '%s\n' 'Usage: [SPLIT=val|test] run_rem_102e_diagnosis.sh BASELINE_RUN REM_RUN | --resume OUT' >&2
     exit 2
 fi
 ulimit -Sn 65535

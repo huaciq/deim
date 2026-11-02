@@ -1,0 +1,8 @@
+# REM at strides 8 and 16 only: ablation of REM-Pyramid without the stride-32 level.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_rem_58e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_s8s16_58e_b28/seed0
+experiment_protocol_document: docs/sar_rem_pyramid_experiment.md
+
+HybridEncoder:
+  rem_feat_indices: [0, 1]

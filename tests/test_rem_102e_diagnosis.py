@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import yaml
 
-from tools.compare_rem_102e import (analyze, evaluate_coco, package, pair_detections,
+from tools.compare_rem_102e import (analyze, class_agnostic, evaluate_coco, package, pair_detections,
                                    prepare, run_exports, select_checkpoint, summarize_training)
 
 
@@ -167,6 +167,41 @@ class Rem102DiagnosisTests(unittest.TestCase):
         self.assertTrue((out / 'DONE').is_file())
         analysis.assert_called_once_with(out)
         packaging.assert_called_once_with(out)
+
+    def test_test_split_reports_class_agnostic_gap_and_type_confusion(self):
+        baseline, _, _ = self.source('baseline')
+        rem, _, _ = self.source('rem')
+        data = self.folder / 'old_server_data'
+        (data / 'COCO').mkdir(parents=True)
+        (data / 'COCO/test.json').write_text(json.dumps(dataset()), encoding='utf-8')
+        out = self.folder / 'output_test'
+        manifest = prepare(baseline, rem, data, out, split='test')
+        self.assertEqual((manifest['split'], Path(manifest['annotation_file']).name), ('test', 'test.json'))
+        self.assertFalse((out / 'val.json').exists())
+        for role, detections in predictions().items():
+            with gzip.open(out / role / 'predictions.json.gz', 'wt', encoding='utf-8') as stream:
+                json.dump(detections, stream)
+        result = analyze(out)
+        self.assertEqual(result['split'], 'test')
+        # REM puts GT 3 (class A) in class B: class-aware AP drops, class-agnostic AP does not.
+        self.assertGreater(result['classification_gap']['rem']['AP'], 0)
+        self.assertGreaterEqual(result['class_agnostic']['rem']['AP'], result['evaluations']['rem']['metrics']['AP'])
+        rows = {r['gt_category']: r for r in result['confusion_at_score03']['rem']}
+        self.assertEqual((rows['A']['gt'], rows['A']['located'], rows['A']['correct'], rows['A']['pred_B']), (2, 2, 1, 1))
+        self.assertEqual((rows['B']['gt'], rows['B']['missed'], rows['B']['correct']), (2, 1, 1))
+        self.assertIn('类别无关 AP', (out / 'report/report.md').read_text(encoding='utf-8'))
+        package(out)
+        with tarfile.open(out / 'diagnosis_bundle.tar.gz') as archive:
+            self.assertIn('test.json', archive.getnames())
+
+    def test_class_agnostic_keeps_one_copy_of_each_query_box(self):
+        data, detections = class_agnostic(dataset(), [detection(0, [10, 10, 40, 40], .2),
+                                                      detection(1, [10, 10, 40, 40], .7),
+                                                      detection(1, [100, 10, 40, 40], .5)])
+        self.assertEqual([c['id'] for c in data['categories']], [0])
+        self.assertEqual({a['category_id'] for a in data['annotations']}, {0})
+        self.assertEqual(sorted(d['score'] for d in detections), [.5, .7])
+        self.assertEqual({d['category_id'] for d in detections}, {0})
 
     def test_training_summary_separates_pre_and_post_stop_periods(self):
         _, config, rows = self.source('baseline')

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Export two saved runs on one server and compare their validation detections."""
+"""Export two saved runs on one server and compare their detections on val or test."""
 
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 import contextlib
 import copy
 import csv
@@ -87,17 +87,24 @@ def prepare_run(run, role_dir, data_root, annotation):
     return selection
 
 
-def prepare(baseline_run, rem_run, data_root, output):
+def split_annotation(output):
+    """The archived split annotation; outputs made before --split are val."""
+    manifest = output / 'manifest.json'
+    split = load_json(manifest).get('split', 'val') if manifest.is_file() else 'val'
+    return output / f'{split}.json', split
+
+
+def prepare(baseline_run, rem_run, data_root, output, split='val'):
     output = Path(output).resolve()
     data_root = Path(data_root).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    annotation = data_root / 'COCO/val.json'
+    annotation = data_root / f'COCO/{split}.json'
     # One common, user-confirmed dataset; no transferred annotations are required.
-    (output / 'val.json').write_bytes(annotation.read_bytes())
+    (output / f'{split}.json').write_bytes(annotation.read_bytes())
     sources = dict(baseline=baseline_run, rem=rem_run)
     selections = {role: prepare_run(sources[role], output / role, data_root, annotation) for role in ROLES}
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    manifest = dict(output=str(output), data_root=str(data_root), annotation_file=str(annotation),
+    manifest = dict(output=str(output), data_root=str(data_root), annotation_file=str(annotation), split=split,
                     analysis_git_revision=revision, runs=selections,
                     export=dict(gpus=[0, 1], precision='float32', batch_per_gpu=8,
                                 confidence_filter=None, extra_nms=False),
@@ -140,6 +147,56 @@ def evaluate_coco(annotation, predictions):
     return dict(metrics={key: float(value * 100) if value >= 0 else None
                          for key, value in zip(METRICS, evaluator.stats[:6])},
                 per_iou_ap=per_iou, classes=class_rows)
+
+
+def class_agnostic(dataset, predictions):
+    """Single-class copy of GT and predictions.
+
+    Query x class flattening repeats a query's box once per class; keep only the
+    highest-scoring copy of each identical box so duplicates are not counted as FP.
+    """
+    data = dict(dataset, categories=[dict(id=0, name='aircraft')],
+                annotations=[dict(a, category_id=0) for a in dataset['annotations']])
+    best = {}
+    for d in predictions:
+        key = (d['image_id'], tuple(round(float(v), 3) for v in d['bbox']))
+        if key not in best or d['score'] > best[key]['score']:
+            best[key] = dict(d, category_id=0)
+    return data, list(best.values())
+
+
+def confusion(dataset, predictions, threshold=SCORE_THRESHOLD, iou=.5):
+    """GT class versus the class of the highest-scoring overlapping prediction.
+
+    Any-class predictions with score>=threshold and IoU>=iou count; this is not a
+    one-to-one assignment, it separates "not localized" from "localized, wrong type".
+    """
+    by_image = defaultdict(list)
+    for d in predictions:
+        if d['score'] >= threshold:
+            by_image[d['image_id']].append(d)
+    ids = [c['id'] for c in dataset['categories']]
+    names = {c['id']: c['name'] for c in dataset['categories']}
+    counts = {category: Counter() for category in ids}
+    for g in dataset['annotations']:
+        detections = by_image[g['image_id']]
+        label = 'missed'
+        if detections:
+            overlap = iou_matrix([g['bbox']], [d['bbox'] for d in detections])[0]
+            hits = [d for d, value in zip(detections, overlap) if value >= iou]
+            if hits:
+                label = max(hits, key=lambda d: d['score'])['category_id']
+        counts[g['category_id']][label] += 1
+    rows = []
+    for category in ids:
+        total = sum(counts[category].values())
+        located = total - counts[category]['missed']
+        rows.append(dict(gt_category_id=category, gt_category=names[category], gt=total, located=located,
+                         correct=counts[category][category], missed=counts[category]['missed'],
+                         located_rate=located / total if total else None,
+                         correct_given_located=counts[category][category] / located if located else None,
+                         **{f'pred_{names[c]}': counts[category][c] for c in ids}))
+    return rows
 
 
 def size_group(annotation):
@@ -236,11 +293,19 @@ def summarize_training(rows, config):
 
 def analyze(output):
     output = Path(output).resolve()
-    dataset = load_json(output / 'val.json')
+    annotation, split = split_annotation(output)
+    dataset = load_json(annotation)
     predictions = {role: load_json(output / role / 'predictions.json.gz') for role in ROLES}
     report = output / 'report'
     report.mkdir(exist_ok=True)
-    evaluations = {role: evaluate_coco(output / 'val.json', predictions[role]) for role in ROLES}
+    evaluations = {role: evaluate_coco(annotation, predictions[role]) for role in ROLES}
+    agnostic, confusions = {}, {}
+    for role in ROLES:
+        data, detections = class_agnostic(dataset, predictions[role])
+        save_json(report / 'class_agnostic_gt.json', data)
+        agnostic[role] = evaluate_coco(report / 'class_agnostic_gt.json', detections)['metrics']
+        confusions[role] = confusion(dataset, predictions[role])
+        write_csv(report / f'confusion_{role}.csv', confusions[role])
     paired = pair_detections(dataset, predictions)
     for key, filename in (('pairs', 'gt_pairs.csv'), ('groups', 'paired_groups.csv'),
                           ('common_geometry', 'common_gt_geometry.csv'), ('candidates', 'candidate_quality.csv')):
@@ -277,7 +342,10 @@ def analyze(output):
             geometry_summary[role][key] = dict(summarize_values(values),
                                                mean_absolute=float(np.mean(np.abs(values))) if values else None)
     errors = {role: error_analysis(dataset, predictions[role], SCORE_THRESHOLD)[0] for role in ROLES}
-    summary = dict(evaluations=evaluations, selections=selections, training=training, paired_groups=paired['groups'],
+    classification_gap = {role: {key: delta(agnostic[role][key], evaluations[role]['metrics'][key])
+                                 for key in METRICS} for role in ROLES}
+    summary = dict(split=split, evaluations=evaluations, class_agnostic=agnostic,
+                   classification_gap=classification_gap, confusion_at_score03=confusions, selections=selections, training=training, paired_groups=paired['groups'],
                    errors_at_score03=errors, common_gt_geometry=geometry_summary,
                    common_gt_delta_iou=summarize_values([r['delta_iou'] for r in paired['common_geometry']]),
                    common_gt_delta_score=summarize_values([r['delta_score'] for r in paired['common_geometry']]),
@@ -290,13 +358,35 @@ def analyze(output):
                        common_geometry='only GT matched in both at score>=0.3 and IoU>=0.5',
                        candidate_quality='full exported candidates; per-GT best IoU is not one-to-one recall'))
     save_json(report / 'summary.json', summary)
-    lines = ['# REM 102 轮配对诊断', '', '两组均使用各自最佳验证 AP 权重，统一 FP32、640 和原后处理。', '',
+    lines = [f'# REM 102 轮配对诊断（{split}）', '',
+             f'两组均使用各自最佳验证 AP 权重，在 {split} 上统一 FP32、640 和原后处理。', '',
              '| 指标 | baseline | REM | 差值（AP 点） |', '|---|---:|---:|---:|']
     for key in METRICS:
         lines.append(f'| {key} | {display(evaluations["baseline"]["metrics"][key])} | '
                      f'{display(evaluations["rem"]["metrics"][key])} | {display(summary["delta_metrics"][key])} |')
     lines += ['', '完整复算指标与训练日志的 AP 差值（AP 点）：' +
               json.dumps(summary['logged_to_export_ap_delta'], ensure_ascii=False), '']
+    lines += ['', '## 类别无关 AP 与分类缺口', '',
+              '所有类别合并为一类，同一框只保留最高类别分数；缺口 = 类别无关 − 原 AP，'
+              '近似表示"框对了但型号错了或型号分数排序差"造成的损失。', '',
+              '| 指标 | baseline 原 | baseline 类别无关 | baseline 缺口 | REM 原 | REM 类别无关 | REM 缺口 |',
+              '|---|---:|---:|---:|---:|---:|---:|']
+    for key in ('AP', 'AP50', 'AP75'):
+        lines.append(f'| {key} | ' + ' | '.join(
+            f'{display(evaluations[role]["metrics"][key])} | {display(agnostic[role][key])} | '
+            f'{display(classification_gap[role][key])}' for role in ROLES) + ' |')
+    lines += ['', '## 各类 AP', '', '| 类别 | baseline AP | REM AP | 差值 | baseline AP75 | REM AP75 |',
+              '|---|---:|---:|---:|---:|---:|']
+    for row in classes:
+        lines.append(f'| {row["category"]} | {display(row["baseline_AP"])} | {display(row["rem_AP"])} | '
+                     f'{display(row["delta_AP"])} | {display(row["baseline_AP75"])} | {display(row["rem_AP75"])} |')
+    lines += ['', '## 定位与型号（score>=0.3，IoU>=0.5，任意类别预测）', '',
+              '| 类别 | GT | baseline 定位率 | baseline 定位后型号正确率 | REM 定位率 | REM 定位后型号正确率 |',
+              '|---|---:|---:|---:|---:|---:|']
+    for base, rem in zip(confusions['baseline'], confusions['rem']):
+        lines.append(f'| {base["gt_category"]} | {base["gt"]} | ' + ' | '.join(
+            display(row[key]) for row in (base, rem) for key in ('located_rate', 'correct_given_located')) + ' |')
+    lines += ['', '完整混淆计数见 confusion_baseline.csv / confusion_rem.csv（行 GT，列预测类别）。']
     lines += ['', '## 同一 GT 的检测得失', '',
               '固定 score>=0.3；计数不等于 AP 损失。完整 AP 使用全部导出预测，不作该阈值过滤。', '',
               '| IoU | 分组 | GT | 两者检出 | REM 新增 | REM 损失 | 都未检出 | 净新增 |',
@@ -321,7 +411,7 @@ def analyze(output):
 def package(output):
     destination = output / 'diagnosis_bundle.tar.gz'
     with tarfile.open(destination, 'w:gz') as archive:
-        for filename in ('manifest.json', 'val.json'):
+        for filename in ('manifest.json', split_annotation(output)[0].name):
             archive.add(output / filename, arcname=filename)
         for role in ROLES:
             for filename in ('resolved_config.yml', 'inference_config.yml', 'log.txt', 'selection.json',
@@ -366,6 +456,7 @@ def main():
     new.add_argument('--rem-run', type=Path, required=True)
     new.add_argument('--data-root', type=Path, required=True)
     new.add_argument('--output', type=Path, required=True)
+    new.add_argument('--split', choices=('val', 'test'), default='val')
     for name in ('resume', 'analyze'):
         command = sub.add_parser(name)
         command.add_argument('--output', type=Path, required=True)
@@ -375,7 +466,7 @@ def main():
         analyze(output)
         package(output)
     else:
-        manifest = (prepare(args.baseline_run, args.rem_run, args.data_root, output)
+        manifest = (prepare(args.baseline_run, args.rem_run, args.data_root, output, args.split)
                     if args.action == 'run' else load_json(output / 'manifest.json'))
         run_exports(output, manifest)
 

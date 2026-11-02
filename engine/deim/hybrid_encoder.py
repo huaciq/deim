@@ -383,6 +383,7 @@ class HybridEncoder(nn.Module):
                  use_spi_module=False,
                  rem_variant='haar_directional',
                  rem_residual_mode='shared',
+                 rem_feat_indices=(0,),
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -526,11 +527,21 @@ class HybridEncoder(nn.Module):
                 self.s2_injection = ShallowDetailInjection(
                     s2_channels, hidden_dim, s2_injection_mode, s2_strip_kernel)
 
+        # Stride-8 REM keeps the reported `rem.*` keys; other projected levels
+        # get independent REMs in rem_levels (empty, so no keys, by default).
         self.rem = None
+        self.rem_levels = nn.ModuleDict()
         if use_rem:
+            indices = [int(index) for index in rem_feat_indices]
+            if len(set(indices)) != len(indices) or not all(0 <= i < len(in_channels) for i in indices):
+                raise ValueError('rem_feat_indices must be distinct encoder feature levels.')
             with torch.random.fork_rng(devices=[]):
-                self.rem = RadarEnhancementModule(hidden_dim, act=act, variant=rem_variant,
-                                                  residual_mode=rem_residual_mode)
+                if 0 in indices:
+                    self.rem = RadarEnhancementModule(hidden_dim, act=act, variant=rem_variant,
+                                                      residual_mode=rem_residual_mode)
+                for index in sorted(set(indices) - {0}):
+                    self.rem_levels[str(index)] = RadarEnhancementModule(
+                        hidden_dim, act=act, variant=rem_variant, residual_mode=rem_residual_mode)
 
         self.pacfg = None
         self.pacfg_feat_index = pacfg_feat_index
@@ -655,6 +666,8 @@ class HybridEncoder(nn.Module):
 
         if self.rem is not None:
             proj_feats[0] = self.rem(proj_feats[0])
+        for index, rem in self.rem_levels.items():
+            proj_feats[int(index)] = rem(proj_feats[int(index)])
 
         if self.pacfg is not None:
             # Default 0 preserves same-level REM -> PACFG; 1 uses stride-16.

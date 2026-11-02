@@ -24,7 +24,7 @@ METRICS = ['AP', 'AP50', 'AP75', 'APs', 'APm', 'APl', 'AR100']
 MODULE_SECTIONS = ['HGNetv2', 'HybridEncoder', 'DFINETransformer', 'DEIMCriterion']
 # Official detector settings, not methods: HGNetv2 learnable affine blocks and focal loss.
 BASE_SWITCHES = {'use_focal_loss', 'use_lab'}
-VARIANT_KEYS = {'use_rem': ['rem_variant', 'rem_residual_mode'], 'use_ost_da': ['ost_da_version'],
+VARIANT_KEYS = {'use_rem': ['rem_variant', 'rem_residual_mode', 'rem_feat_indices'], 'use_ost_da': ['ost_da_version'],
                 'use_slqc': ['slqc_mode'], 'use_dsg': ['dsg_mode']}
 NAME_PREFIXES = ['deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_', 'deim_m_sar_aircraft_',
                  'deim_hgnetv2_m_sar_aircraft_']
