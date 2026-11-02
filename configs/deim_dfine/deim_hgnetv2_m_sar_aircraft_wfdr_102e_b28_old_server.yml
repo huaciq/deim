@@ -1,0 +1,11 @@
+# Standalone W-FDR under the complete frozen 102-epoch SAR baseline.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_wfdr_102e_b28/seed0
+experiment_protocol_document: docs/sar_wfdr_102e_experiment.md
+
+DEIMCriterion:
+  use_wfdr: True
+  wfdr_weight: 0.5
+  weight_dict:
+    loss_wfdr: 0.15  # Preserve loss_fgl: 0.15 * (DFL + 0.5 * W1).
