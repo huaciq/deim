@@ -77,6 +77,7 @@ modules = {
     'clcr': bool(cfg.get('DFINETransformer', {}).get('use_clcr', False)),
     'clcr_hidden_dim': cfg.get('DFINETransformer', {}).get('clcr_hidden_dim', 64),
     'clcr_lite': bool(cfg.get('DFINETransformer', {}).get('use_clcr_lite', False)),
+    'mdcc': bool(cfg.get('DFINETransformer', {}).get('use_mdcc', False)),
     'bccq': bool(cfg.get('DFINETransformer', {}).get('use_bccq', False)),
     'sdcp': bool(cfg.get('DFINETransformer', {}).get('use_sdcp', False)),
     'sdcp_temperature': cfg.get('DFINETransformer', {}).get('sdcp_temperature', 10.),
@@ -192,6 +193,8 @@ metadata = dict(
     sdcp_settings={k:v for k,v in criterion.items() if k.startswith('sdcp_') or k == 'use_sdcp'},
     mpq_settings={k:v for k,v in criterion.items() if k.startswith('mpq_')},
     resolved_config=cfg,
+    mdcc_settings={k:v for k,v in cfg.get('DFINETransformer', {}).items() if k.startswith('mdcc_') or k == 'use_mdcc'},
+    mdcc_ortho_weight=criterion.get('weight_dict', {}).get('loss_mdcc_ortho'),
 )
 filename = 'run_metadata.json' if mode == 'new' else os.environ['ATTEMPT'] + '.metadata.json'
 (run / filename).write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding='utf-8')

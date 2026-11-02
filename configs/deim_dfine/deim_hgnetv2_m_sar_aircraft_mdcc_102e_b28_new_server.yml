@@ -1,0 +1,11 @@
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28.yml']
+output_dir: /root/zxy/experiments/deim_m_sar_aircraft_mdcc_102e_b28/seed0
+experiment_protocol_document: docs/sar_mdcc_102e_experiment.md
+DFINETransformer:
+  use_mdcc: True
+  mdcc_tau_min: 8.0
+  mdcc_tau_max: 16.0
+  mdcc_ortho_gamma: 0.1
+DEIMCriterion:
+  weight_dict:
+    loss_mdcc_ortho: 0.1

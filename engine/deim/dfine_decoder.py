@@ -480,6 +480,39 @@ class CLCRLite(nn.Module):
         return self.beta.to(dtype=scores.dtype) * correction.to(dtype=scores.dtype)
 
 
+class MagnitudeDecoupledCosineClassifier(nn.Linear):
+    """Cosine logits with a learned, bounded log-magnitude scale."""
+
+    def __init__(self, linear, tau_min=8., tau_max=16.):
+        super().__init__(linear.in_features, linear.out_features, bias=True)
+        if not 0 < tau_min < tau_max:
+            raise ValueError('MDCC requires 0 < tau_min < tau_max.')
+        self.weight = linear.weight
+        self.bias = linear.bias
+        self.tau_min, self.tau_max = float(tau_min), float(tau_max)
+        self.a = nn.Parameter(torch.ones(()))
+        self.d = nn.Parameter(torch.tensor(-math.log1p(math.sqrt(linear.in_features))))
+
+    def temperature(self, x):
+        magnitude = torch.linalg.vector_norm(x.float(), dim=-1, keepdim=True)
+        return self.tau_min + (self.tau_max - self.tau_min) * torch.sigmoid(
+            self.a.float() * torch.log1p(magnitude) + self.d.float())
+
+    def forward(self, x):
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            cosine = F.linear(F.normalize(x.float(), dim=-1, eps=1e-6),
+                              F.normalize(self.weight.float(), dim=-1, eps=1e-6))
+            logits = self.temperature(x) * cosine + self.bias.float()
+        return logits.to(x.dtype)
+
+    def orthogonality_loss(self, gamma):
+        with torch.autocast(device_type=self.weight.device.type, enabled=False):
+            weight = F.normalize(self.weight.float(), dim=-1, eps=1e-6)
+            similarity = weight @ weight.T
+            mask = ~torch.eye(self.out_features, dtype=torch.bool, device=weight.device)
+            return F.relu(similarity[mask] - gamma).square().sum()
+
+
 class LQE(nn.Module):
     def __init__(self, k, hidden_dim, num_layers, reg_max, act='relu'):
         super(LQE, self).__init__()
@@ -740,6 +773,10 @@ class DFINETransformer(nn.Module):
                  clcr_lite_detach_inputs=False,
                  clcr_lite_start_epoch=0,
                  use_bccq=False,
+                 use_mdcc=False,
+                 mdcc_tau_min=8.,
+                 mdcc_tau_max=16.,
+                 mdcc_ortho_gamma=0.1,
                  bccq_dim=128,
                  bccq_heads=4,
                  bccq_feedforward=512,
@@ -748,6 +785,8 @@ class DFINETransformer(nn.Module):
                  bccq_checkpoint=True,
                  ):
         super().__init__()
+        if use_mdcc and (use_sdcp or use_bccq or use_slqc or query_select_method == 'agnostic'):
+            raise ValueError('MDCC requires class-wise encoder selection and independent original score heads.')
         assert len(feat_channels) <= num_levels
         assert len(feat_strides) == len(feat_channels)
         if use_clcr and use_clcr_lite:
@@ -970,6 +1009,16 @@ class DFINETransformer(nn.Module):
             # Only the original first head is used for coarse pre-output MAL.
             # Remove unused trainable heads so ordinary DDP needs no unused-parameter mode.
             self.dec_score_head = nn.ModuleList([self.dec_score_head[0]] + [nn.Identity() for _ in range(num_layers - 1)])
+
+        self.use_mdcc = use_mdcc
+        self.mdcc_ortho_gamma = float(mdcc_ortho_gamma)
+        if use_mdcc:
+            with torch.random.fork_rng(devices=[]):
+                self.enc_score_head = MagnitudeDecoupledCosineClassifier(
+                    self.enc_score_head, mdcc_tau_min, mdcc_tau_max)
+                self.dec_score_head = nn.ModuleList([
+                    MagnitudeDecoupledCosineClassifier(head, mdcc_tau_min, mdcc_tau_max)
+                    for head in self.dec_score_head])
 
     def convert_to_deploy(self):
         self.scs_head = None
@@ -1262,6 +1311,10 @@ class DFINETransformer(nn.Module):
 
         if self.use_scs and self.training:
             out['pred_scs'] = self.scs_head(final_queries)
+
+        if self.use_mdcc and self.training:
+            out['mdcc_ortho'] = sum(head.orthogonality_loss(self.mdcc_ortho_gamma)
+                                    for head in [self.enc_score_head, *self.dec_score_head])
 
         if self.use_bccq:
             out.update({'bccq_' + name: value[-1] for name, value in bccq_results.items()})

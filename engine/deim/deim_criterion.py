@@ -724,6 +724,11 @@ class DEIMCriterion(nn.Module):
             # never replace pred_logits in matching or any detection loss.
             losses['loss_mpq'] = self.mpq_loss(outputs, targets, indices, **kwargs) * self.weight_dict['loss_mpq']
 
+        if 'mdcc_ortho' in outputs:
+            if 'loss_mdcc_ortho' not in self.weight_dict:
+                raise ValueError('MDCC requires weight_dict.loss_mdcc_ortho.')
+            losses['loss_mdcc_ortho'] = outputs['mdcc_ortho'] * self.weight_dict['loss_mdcc_ortho']
+
         # Keep numerical failures visible to the engine before backward.
         # Replacing a NaN loss with zero does not repair its backward graph.
         return losses

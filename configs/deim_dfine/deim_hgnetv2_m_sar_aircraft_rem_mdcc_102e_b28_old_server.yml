@@ -1,0 +1,4 @@
+__include__: ['./deim_hgnetv2_m_sar_aircraft_mdcc_102e_b28_old_server.yml']
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_mdcc_102e_b28/seed0
+HybridEncoder:
+  use_rem: True
