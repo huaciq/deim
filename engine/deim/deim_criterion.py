@@ -62,6 +62,7 @@ class DEIMCriterion(nn.Module):
         sdcp_lambda_over=0.2,
         use_wfdr=False,
         wfdr_weight=0.5,
+        use_bccq=False,
         ):
         """Create the criterion.
         Parameters:
@@ -112,6 +113,62 @@ class DEIMCriterion(nn.Module):
         if use_wfdr and 'loss_wfdr' not in weight_dict:
             raise ValueError('W-FDR requires an explicit loss_wfdr entry in weight_dict (normally loss_fgl weight).')
         self.wfdr_loss = WassersteinFDRLoss(reg_max, wfdr_weight) if use_wfdr else None
+        self.use_bccq = use_bccq
+        self.bccq_metrics = {}
+        if use_bccq and (use_sdcp or 'mal' not in losses or
+                         not {'loss_bccq_type', 'loss_bccq_quality'}.issubset(weight_dict)):
+            raise ValueError('BCCQ requires mal dispatch, explicit type/quality weights and no SDCP.')
+
+    def loss_bccq(self, outputs, targets, indices, num_boxes, **kwargs):
+        """Unweighted positive type CE and scalar MAL-style IoU-quality supervision.
+
+        Each layer uses its own original classification matches, never the box
+        matching union. DN negatives/padding receive quality=0 and no type CE.
+        num_boxes is the global GT average per rank (times DN groups for DN).
+        """
+        types = outputs['bccq_type_logits'].float()
+        quality = outputs['bccq_quality_logits'].float()
+        idx = self._get_src_permutation_idx(indices)
+        labels = torch.cat([t['labels'][j] for t, (_, j) in zip(targets, indices)])
+        with torch.autocast(device_type=quality.device.type, enabled=False):
+            with torch.no_grad():
+                boxes = outputs['pred_boxes'][idx].detach().float()
+                gt = torch.cat([t['boxes'][j] for t, (_, j) in zip(targets, indices)]).float()
+                iou = torch.diag(box_iou(box_cxcywh_to_xyxy(boxes), box_cxcywh_to_xyxy(gt))[0]).clamp(0., 1.)
+                target = torch.zeros_like(quality)
+                target[idx] = iou.pow(self.gamma).unsqueeze(-1)
+                probability = quality.detach().sigmoid()
+                weight = probability.pow(self.gamma) * (1. if self.mal_alpha is None else self.mal_alpha)
+                weight[idx] = 1.
+            type_loss = F.cross_entropy(types[idx], labels, reduction='sum') if labels.numel() else types.sum() * 0.
+            quality_loss = F.binary_cross_entropy_with_logits(quality, target, weight=weight, reduction='sum')
+        return {'loss_bccq_type': type_loss / num_boxes, 'loss_bccq_quality': quality_loss / num_boxes}
+
+    @torch.no_grad()
+    def _record_bccq_metrics(self, outputs, targets, indices):
+        from .band_conditioned_queries import SOURCE_NAMES
+        idx = self._get_src_permutation_idx(indices)
+        labels = torch.cat([t['labels'][j] for t, (_, j) in zip(targets, indices)])
+        gates = outputs['bccq_source_weights'][idx][torch.arange(len(labels), device=labels.device), labels]
+        entropy = outputs['bccq_source_entropy'][idx][torch.arange(len(labels), device=labels.device), labels]
+        correct = outputs['bccq_type_logits'][idx].float().softmax(-1).gather(1, labels[:, None]).flatten()
+        values = torch.cat((gates.float(), entropy[:, None].float(), correct[:, None],
+                            torch.ones_like(correct[:, None])), -1)
+        stats = values.new_zeros(self.num_classes, len(SOURCE_NAMES) + 3)
+        stats.index_add_(0, labels, values)
+        if is_dist_available_and_initialized():
+            torch.distributed.all_reduce(stats)
+        metrics = {}
+        for category in range(self.num_classes):
+            count = stats[category, -1]
+            metrics[f'bccq_positive_c{category}'] = count
+            # Epoch means of these sums divided by the epoch mean count yield
+            # instance-weighted statistics, including batches where a class is absent.
+            for source, value in zip(SOURCE_NAMES, stats[category]):
+                metrics[f'bccq_gate_sum_c{category}_{source}'] = value
+            metrics[f'bccq_gate_entropy_sum_c{category}'] = stats[category, -3]
+            metrics[f'bccq_correct_probability_sum_c{category}'] = stats[category, -2]
+        self.bccq_metrics = metrics
 
     def loss_sdcp_margin(self, outputs, targets, indices):
         """Mean squared probability-margin hinge on final matched ordinary queries.
@@ -416,6 +473,8 @@ class DEIMCriterion(nn.Module):
         self.num_pos, self.num_neg = None, None
 
     def get_loss(self, loss, outputs, targets, indices, num_boxes, **kwargs):
+        if self.use_bccq and loss == 'mal' and 'bccq_type_logits' in outputs:
+            return self.loss_bccq(outputs, targets, indices, num_boxes, **kwargs)
         loss_map = {
             'boxes': self.loss_boxes,
             'focal': self.loss_labels_focal,
@@ -447,6 +506,10 @@ class DEIMCriterion(nn.Module):
         # Retrieve the matching between the outputs of the last layer and the targets
         indices = self.matcher(outputs_without_aux, targets)['indices']
         self._clear_cache()
+        if self.use_bccq:
+            if 'bccq_type_logits' not in outputs or 'bccq_quality_logits' not in outputs:
+                raise ValueError('BCCQ criterion requires the complete BCCQ model outputs.')
+            self._record_bccq_metrics(outputs, targets, indices)
 
         # Get the matching union set across all decoder layers.
         if 'aux_outputs' in outputs:

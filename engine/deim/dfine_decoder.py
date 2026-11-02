@@ -28,6 +28,7 @@ from .scale_aware_refinement import ScaleAwareRefinement
 from .scattering_signature import ScatteringSignatureHead
 from .scattering_layout import ScatteringLayoutQueryClassifier
 from .query_prototypes import QueryPrototypeHead
+from .band_conditioned_queries import BandConditionedClassQueries, joint_detection_logits
 from .orthogonal_topology_attention import OrthogonalTopologyDeformAttn
 from .symmetric_topology_attention import SymmetricOrthogonalTopologyDeformAttn
 from ..core import register
@@ -535,6 +536,7 @@ class TransformerDecoder(nn.Module):
         self.clcr_lite = None
         self.use_sdcp = False
         self.sdcp_sampler = None
+        self.bccq = None
 
     def value_op(self, memory, value_proj, value_scale, memory_mask, memory_spatial_shapes):
         """
@@ -589,6 +591,10 @@ class TransformerDecoder(nn.Module):
             project = self.project
 
         ref_points_detach = F.sigmoid(ref_points_unact)
+        if self.bccq is not None:
+            bccq_sources = self.bccq.prepare_sources(memory, spatial_shapes)
+            bccq_states = self.bccq.initialize_queries(target)
+            bccq_outputs = {name: [] for name in ('type_logits', 'quality_logits', 'source_weights', 'source_entropy')}
 
         for i, layer in enumerate(self.layers):
             ref_points_input = ref_points_detach.unsqueeze(2)
@@ -619,8 +625,18 @@ class TransformerDecoder(nn.Module):
             pred_corners = bbox_head[i](output + output_detach) + pred_corners_undetach
             inter_ref_bbox = distance2bbox(ref_points_initial, integral(pred_corners, project), reg_scale)
 
+            if self.bccq is not None:
+                bccq_states, source_weights, source_entropy = self.bccq.step(
+                    i, bccq_states, inter_ref_bbox, bccq_sources)
+
             if self.training or i == self.eval_idx:
-                if self.use_sdcp:
+                if self.bccq is not None:
+                    type_logits = self.bccq.classify(bccq_states)
+                    quality_logits = self.lqe_layers[i](self.bccq.quality_heads[i](output), pred_corners)
+                    scores = joint_detection_logits(type_logits, quality_logits)
+                    for name, payload in zip(bccq_outputs, (type_logits, quality_logits, source_weights, source_entropy)):
+                        bccq_outputs[name].append(payload)
+                elif self.use_sdcp:
                     local_evidence = self.sdcp_sampler.pool_local_evidence(inter_ref_bbox, local_feature)
                     raw_scores = score_head[i](output, local_evidence[0], inter_ref_bbox, image_size)
                     scores = self.lqe_layers[i](raw_scores, pred_corners, inter_ref_bbox, local_feature,
@@ -650,6 +666,8 @@ class TransformerDecoder(nn.Module):
             result += (output,)
         if self.use_sdcp and self.training:
             result += (raw_scores,)
+        if self.bccq is not None:
+            result += ({name: torch.stack(values) for name, values in bccq_outputs.items()},)
         return result
 
 
@@ -721,6 +739,13 @@ class DFINETransformer(nn.Module):
                  ost_da_version='v1',
                  clcr_lite_detach_inputs=False,
                  clcr_lite_start_epoch=0,
+                 use_bccq=False,
+                 bccq_dim=128,
+                 bccq_heads=4,
+                 bccq_feedforward=512,
+                 bccq_roi_size=5,
+                 bccq_query_chunk_size=64,
+                 bccq_checkpoint=True,
                  ):
         super().__init__()
         assert len(feat_channels) <= num_levels
@@ -729,6 +754,11 @@ class DFINETransformer(nn.Module):
             raise ValueError('CLCR and CLCR-Lite are alternative calibrators; enable only one.')
         if use_clcr_lite and num_classes < 2:
             raise ValueError('CLCR-Lite requires at least two competing classes.')
+        if use_bccq and any((use_clcr, use_clcr_lite, use_sdcp, use_slqc, use_mpq, use_scs,
+                             use_scas, use_sbr, use_brl, use_sar)):
+            raise ValueError('BCCQ defines the complete classification path; other classification/calibration heads must be disabled.')
+        if use_bccq and (layer_scale != 1 or num_levels < 2 or list(feat_strides[:2]) != [8, 16]):
+            raise ValueError('BCCQ requires layer_scale=1 and stride-8/16 first feature levels.')
 
         for _ in range(num_levels - len(feat_strides)):
             feat_strides.append(feat_strides[-1] * 2)
@@ -929,11 +959,24 @@ class DFINETransformer(nn.Module):
             self.decoder.use_sdcp = True
             self.decoder.sdcp_sampler = BoxLocalEvidenceSampler()
 
+        self.use_bccq = use_bccq
+        if use_bccq:
+            # Preserve common COCO initialization and the subsequent DN/data RNG.
+            with torch.random.fork_rng(devices=[]):
+                self.decoder.bccq = BandConditionedClassQueries(
+                    hidden_dim, num_classes, num_layers, self.eval_idx,
+                    bccq_dim, bccq_heads, bccq_feedforward, bccq_roi_size,
+                    bccq_query_chunk_size, bccq_checkpoint)
+            # Only the original first head is used for coarse pre-output MAL.
+            # Remove unused trainable heads so ordinary DDP needs no unused-parameter mode.
+            self.dec_score_head = nn.ModuleList([self.dec_score_head[0]] + [nn.Identity() for _ in range(num_layers - 1)])
+
     def convert_to_deploy(self):
         self.scs_head = None
         self.use_scs = False
         self.mpq_head = None
-        self.dec_score_head = nn.ModuleList([nn.Identity()] * (self.eval_idx) + [self.dec_score_head[self.eval_idx]])
+        if not self.use_bccq:
+            self.dec_score_head = nn.ModuleList([nn.Identity()] * (self.eval_idx) + [self.dec_score_head[self.eval_idx]])
         self.dec_bbox_head = nn.ModuleList(
             [self.dec_bbox_head[i] if i <= self.eval_idx else nn.Identity() for i in range(len(self.dec_bbox_head))]
         )
@@ -1162,6 +1205,7 @@ class DFINETransformer(nn.Module):
         out_bboxes, out_logits, out_corners, out_refs, pre_bboxes, pre_logits = decoder_results[:6]
         final_queries = decoder_results[6] if need_queries else None
         sdcp_logits = decoder_results[-1] if self.use_sdcp and self.training else None
+        bccq_results = decoder_results[-1] if self.use_bccq else None
 
         if self.training and dn_meta is not None:
             # the output from the first decoder layer, only one
@@ -1177,6 +1221,11 @@ class DFINETransformer(nn.Module):
                 _, final_queries = torch.split(final_queries, dn_meta['dn_num_split'], dim=1)
             if sdcp_logits is not None:
                 _, sdcp_logits = torch.split(sdcp_logits, dn_meta['dn_num_split'], dim=1)
+            if bccq_results is not None:
+                dn_bccq_results, ordinary_bccq = {}, {}
+                for name, value in bccq_results.items():
+                    dn_bccq_results[name], ordinary_bccq[name] = torch.split(value, dn_meta['dn_num_split'], dim=2)
+                bccq_results = ordinary_bccq
 
         localization_teacher_logits = out_logits[-1]
         if self.slqc is not None:
@@ -1213,6 +1262,9 @@ class DFINETransformer(nn.Module):
 
         if self.use_scs and self.training:
             out['pred_scs'] = self.scs_head(final_queries)
+
+        if self.use_bccq:
+            out.update({'bccq_' + name: value[-1] for name, value in bccq_results.items()})
 
         if self.mpq_head is not None and self.training:
             out.update(self.mpq_head(final_queries))
@@ -1355,12 +1407,18 @@ class DFINETransformer(nn.Module):
             out['enc_aux_outputs'] = self._set_aux_loss(enc_topk_logits_list, enc_topk_bboxes_list)
             out['pre_outputs'] = {'pred_logits': pre_logits, 'pred_boxes': pre_bboxes}
             out['enc_meta'] = {'class_agnostic': self.query_select_method == 'agnostic'}
+            if self.use_bccq:
+                for index, aux in enumerate(out['aux_outputs']):
+                    aux.update({'bccq_' + name: value[index] for name, value in bccq_results.items()})
 
             if dn_meta is not None:
                 out['dn_outputs'] = self._set_aux_loss2(dn_out_logits, dn_out_bboxes, dn_out_corners, dn_out_refs,
                                                         dn_out_corners[-1], dn_out_logits[-1])
                 out['dn_pre_outputs'] = {'pred_logits': dn_pre_logits, 'pred_boxes': dn_pre_bboxes}
                 out['dn_meta'] = dn_meta
+                if self.use_bccq:
+                    for index, aux in enumerate(out['dn_outputs']):
+                        aux.update({'bccq_' + name: value[index] for name, value in dn_bccq_results.items()})
 
         return out
 

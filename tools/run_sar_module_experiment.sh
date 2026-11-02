@@ -13,8 +13,8 @@ conda activate deim_zxy
 if [ "$#" -eq 1 ] && [ "$1" != "--resume" ]; then
     MODE=new
     CONFIG=$1
-    INITIAL=${INITIAL_WEIGHTS:-/root/zxy/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth}
-    EXPERIMENT_ROOT=${EXPERIMENT_ROOT:-/root/zxy/experiments}
+    INITIAL=${INITIAL_WEIGHTS:-/home/zxy/sar/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth}
+    EXPERIMENT_ROOT=${EXPERIMENT_ROOT:-/home/zxy/sar/experiments}
     mkdir -p "$EXPERIMENT_ROOT"
     NAME=$(basename "$CONFIG")
     NAME=${NAME%.*}
@@ -77,6 +77,7 @@ modules = {
     'clcr': bool(cfg.get('DFINETransformer', {}).get('use_clcr', False)),
     'clcr_hidden_dim': cfg.get('DFINETransformer', {}).get('clcr_hidden_dim', 64),
     'clcr_lite': bool(cfg.get('DFINETransformer', {}).get('use_clcr_lite', False)),
+    'bccq': bool(cfg.get('DFINETransformer', {}).get('use_bccq', False)),
     'sdcp': bool(cfg.get('DFINETransformer', {}).get('use_sdcp', False)),
     'sdcp_temperature': cfg.get('DFINETransformer', {}).get('sdcp_temperature', 10.),
     'sdcp_aspect_dim': cfg.get('DFINETransformer', {}).get('sdcp_aspect_dim', 16),
@@ -119,8 +120,25 @@ metadata = dict(
     amp=dict(enabled=cfg.get('use_amp'), dtype=cfg.get('amp_dtype'),
              fp32_loss=cfg.get('amp_loss_fp32'), fp32_retry=cfg.get('amp_fp32_retry'), scaler=cfg.get('scaler', {})),
     initialization=os.environ['INITIAL'], initialization_mode='COCO tuning -t; fresh optimizer' if mode == 'new' else 'restore -r from saved configuration and last.pth',
-    training_only_loss_weights={k:v for k,v in criterion.get('weight_dict', {}).items() if k.startswith(('loss_scs', 'loss_mpq', 'loss_margin', 'loss_asym_box', 'loss_wfdr'))},
+    training_only_loss_weights={k:v for k,v in criterion.get('weight_dict', {}).items() if k.startswith(('loss_scs', 'loss_mpq', 'loss_margin', 'loss_asym_box', 'loss_wfdr', 'loss_bccq'))},
     wfdr_settings={k:v for k,v in criterion.items() if k.startswith('wfdr_') or k == 'use_wfdr'},
+    bccq_settings=(dict(
+        sources=['P3 spatial', 'P4 spatial', 'LL', 'LH', 'HL', 'HH'],
+        signed_bands=True, haar_on='projected P3 FPN output', instance_conditioned=True,
+        class_queries=cfg['num_classes'], classification_layers=cfg['DFINETransformer']['num_layers'],
+        settings={k:v for k,v in cfg['DFINETransformer'].items() if k.startswith('bccq_')},
+        output='sigmoid(objectness + original LQE) * softmax(type)',
+        quality_target='detached IoU ** criterion.gamma, unmatched and DN negatives zero',
+        quality_gamma=criterion.get('gamma'),
+        quality_negative_alpha=1. if criterion.get('mal_alpha') is None else criterion['mal_alpha'],
+        type_loss='positive-only CE, no IoU weighting; ordinary/aux/DN positives',
+        type_weight=criterion['weight_dict'].get('loss_bccq_type'),
+        quality_weight=criterion['weight_dict'].get('loss_bccq_quality'),
+        coarse_heads='original encoder/pre-output MAL', start_epoch=0,
+        sampling='predicted detached boxes, configured ROI grid [-0.4,0.4], border, align_corners=False',
+        sampling_math='FP32 grid_sample; FP32 attention, RMS and score factorization',
+        memory='linear K/V before ROI pooling; query chunks and non-reentrant activation checkpoint',
+        classification_matching='per-layer original indices; box/FGL union unchanged') if modules['bccq'] else None),
     rem_settings=(dict(variant=modules['rem_variant'], channels=cfg['HybridEncoder']['hidden_dim'],
         placement='stride-8 input_proj, before FPN/PAN', alpha_initialization=0.,
         residual_mode=modules['rem_residual_mode'],

@@ -1,0 +1,20 @@
+# Complete BCCQ, independently evaluated under the frozen old-server 102e protocol.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_bccq_102e_b28/seed0
+experiment_protocol_document: docs/sar_bccq_102e_experiment.md
+
+DFINETransformer:
+  use_bccq: True
+  bccq_dim: 128
+  bccq_heads: 4
+  bccq_feedforward: 512
+  bccq_roi_size: 5
+  bccq_query_chunk_size: 64
+  bccq_checkpoint: True
+
+DEIMCriterion:
+  use_bccq: True
+  weight_dict:
+    loss_bccq_type: 1
+    loss_bccq_quality: 1
