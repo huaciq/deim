@@ -1,0 +1,14 @@
+# Scheme B: the frozen 640 / 102-epoch SAR baseline trained on the official trainval split
+# (dataset ImageSets trainval = train + val, 13513 targets), reported on test with final.pth.
+# Differs from the frozen config only by the training annotations and fixed_schedule.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_trainval_102e_b28/seed0
+experiment_protocol_document: docs/sar_protocol_v2.md
+
+# val is inside the training set: no val-selected reload at stop_epoch or in stage 2.
+fixed_schedule: True
+
+train_dataloader:
+  dataset:
+    ann_file: /home/zxy/sar/datasets/SAR-AIRcraft-1.0/COCO/trainval.json

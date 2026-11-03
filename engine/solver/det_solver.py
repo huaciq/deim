@@ -64,6 +64,8 @@ class DetSolver(BaseSolver):
                 print(f'best_stat: {best_stat}')
 
         best_stat_print = best_stat.copy()
+        fixed_schedule = bool(args.yaml_cfg.get('fixed_schedule', False))
+        print(f'fixed_schedule={fixed_schedule}')
         start_time = time.time()
         start_epoch = self.last_epoch + 1
         for epoch in range(start_epoch, args.epoches):
@@ -74,7 +76,10 @@ class DetSolver(BaseSolver):
                 self.train_dataloader.sampler.set_epoch(epoch)
 
             if epoch == self.train_dataloader.collate_fn.stop_epoch:
-                self.load_resume_state(str(self.output_dir / 'best_stg1.pth'))
+                # fixed_schedule: weights follow the schedule only (no val-selected reload),
+                # for training sets that include the evaluation split.
+                if not fixed_schedule:
+                    self.load_resume_state(str(self.output_dir / 'best_stg1.pth'))
                 self.ema.decay = self.train_dataloader.collate_fn.ema_restart_decay
                 print(f'Refresh EMA at epoch {epoch} with decay {self.ema.decay}')
 
@@ -160,7 +165,7 @@ class DetSolver(BaseSolver):
                         top1 = max(test_stats[k][0], top1)
                         dist_utils.save_on_master(self.state_dict(), self.output_dir / 'best_stg1.pth')
 
-                elif epoch >= self.train_dataloader.collate_fn.stop_epoch:
+                elif epoch >= self.train_dataloader.collate_fn.stop_epoch and not fixed_schedule:
                     best_stat = {'epoch': -1, }
                     self.ema.decay -= 0.0001
                     self.load_resume_state(str(self.output_dir / 'best_stg1.pth'))

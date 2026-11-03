@@ -1,0 +1,7 @@
+# Scheme B: stride-8 REM; differs from the scheme-B baseline only by REM.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_trainval_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_trainval_102e_b28/seed0
+
+HybridEncoder:
+  use_rem: True

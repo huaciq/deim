@@ -67,6 +67,23 @@ class ProtocolV2StageOneTests(unittest.TestCase):
         new['train_dataloader']['collate_fn'] = dict(new['train_dataloader']['collate_fn'], base_size=640)
         self.assertEqual(new, old)
 
+    def test_trainval_changes_only_training_annotations_and_schedule(self):
+        new, raw = resolved('trainval_102e_b28')
+        old, _ = resolved('102e_b28')
+        self.assertTrue((ROOT / raw['experiment_protocol_document']).is_file())
+        self.assertIs(new.pop('fixed_schedule'), True)
+        self.assertEqual(new['train_dataloader']['dataset']['ann_file'],
+                         '/home/zxy/sar/datasets/SAR-AIRcraft-1.0/COCO/trainval.json')
+        self.assertTrue(new['val_dataloader']['dataset']['ann_file'].endswith('/COCO/val.json'))
+        new['train_dataloader']['dataset'] = dict(new['train_dataloader']['dataset'],
+                                                  ann_file=old['train_dataloader']['dataset']['ann_file'])
+        self.assertEqual(new, old)
+        rem, _ = resolved('rem_trainval_102e_b28')
+        self.assertTrue(rem['HybridEncoder'].pop('use_rem'))
+        base, _ = resolved('trainval_102e_b28')
+        base['HybridEncoder'].pop('use_rem', None)
+        self.assertEqual(rem, base)
+
     def test_rem_1024_adds_only_rem(self):
         rem, _ = resolved('rem_1024_102e_b12')
         base, _ = resolved('1024_102e_b12')

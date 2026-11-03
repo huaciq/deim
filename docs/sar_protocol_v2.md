@@ -95,6 +95,31 @@ ARJ21 35.03 / 37.11，Boeing737 22.07 / 23.29，Boeing787 34.56 / 42.43，other 
 
 另一个共性问题：两种分辨率前 15 轮 val 都很低，18 轮 warmup 占了训练的 1/6。缩短 warmup 是潜在 trick，放到阶段 2/3 单独检验。
 
+## 2.2 策略调整（2026-11-03）：停止逐项调分辨率，主协议改为方案 B
+
+用户判断：640/1024 下 test AP50 都只有约 64–67，比文献的 85–90 低一档，逐项试下去效率太低。已有证据的结论：
+
+1. **差距不在检测能力本身。** 我们的 val AP50 约 88（640），与文献 RT-DETR 87.6、YOLOv8 88.7、DINO 85.2 同档；
+   test 上类别无关 AP50 81.9，高于官方单类结果 71.6；train 中见过的 test 目标型号正确率 0.94。DEIM-D-FINE 不是瓶颈。
+2. **差距来自训练集合与评估口径。** test 中没在 train 出现过的目标只有约 0.41 的型号正确率；官方识别实验与 SAR-Net 用
+   官方 trainval（13513 个目标）训练，若 val 含有 test 飞机的重叠切片，用 trainval 训练会让 test 中"见过"的比例上升。
+   部分文献只写"mAP"，评估集合不明，也可能是在 val 上。我们一直在最难的口径（只用 train，测 test）下比较。
+3. **训练配方已收敛。** 640 冻结配方在约第 65 轮走平，`final.pth` 与 val 选权重在 test 上一致；延长轮数或提高分辨率都没有改善 test。
+
+**决定**
+
+- **主协议：方案 B**——官方 trainval 训练（数据集自带 `COCO/trainval.json`，即 ImageSets 的 trainval），官方 test 报告，
+  640 冻结配方，102 轮，`fixed_schedule: True`（关闭 val 驱动的 epoch 90 载入和 stage-2 回退），取 `final.pth`。
+  这与官方数据集论文的"训练集 13513 / 测试集 2950"和 SAR-Net 的"默认划分"一致，不需要选权重集合。
+- 方案 A 保留为诊断口径（已有结果不作废）；分辨率/增强/轮数的逐项搜索停止。800 运行若已开始可跑完作参考，未开始则不跑。
+- 先用 CPU 跑 `tools/check_split_overlap.py`，量化 test 中"train 没有、val 有"的目标数，预估方案 B 的提升并解释文献差距。
+- 运行顺序：B baseline → B REM → 在 B 上做方法（斑点重采样）。若 B baseline 的 test AP50 仍明显低于 80，
+  再在同一协议下复现一个外部基线（如 Ultralytics YOLOv8）判断是否是 DEIM 配方问题。
+
+配置：`deim_hgnetv2_m_sar_aircraft_trainval_102e_b28_old_server.yml`（只改训练标注与 `fixed_schedule`），
+`deim_hgnetv2_m_sar_aircraft_rem_trainval_102e_b28_old_server.yml`（只多 REM）。训练中每轮仍在 val 上评估，
+但 val 已在训练集内，这些数字只用于观察曲线，不用于选权重；`best_stg*.pth` 不使用。
+
 ## 3. 服务器命令（旧服务器）
 
 更新代码与环境：
