@@ -116,6 +116,30 @@ ARJ21 35.03 / 37.11，Boeing737 22.07 / 23.29，Boeing787 34.56 / 42.43，other 
 - 运行顺序：B baseline → B REM → 在 B 上做方法（斑点重采样）。若 B baseline 的 test AP50 仍明显低于 80，
   再在同一协议下复现一个外部基线（如 Ultralytics YOLOv8）判断是否是 DEIM 配方问题。
 
+**划分重叠检查结果（2026-11-03，`/data2/zxy/sar/experiments/diagnostics/split_overlap_*`，阈值 0.9）：
+val 与 test 重叠 73.3%，这是文献分数高的主要来源。**
+
+| 查询 | 参照 | 有匹配比例 |
+|---|---|---:|
+| val | train | 81.8% |
+| test | train | 50.3% |
+| test | val | 73.3% |
+| test | train + val | 77.4%（其中 797 个只在 val 中出现） |
+
+| test 类别 | GT | train 中见过 | train + val 中见过 |
+|---|---:|---:|---:|
+| Boeing737 | 550 | 128（23%） | 398（72%） |
+| A220 | 460 | 252（55%） | 357（78%） |
+| ARJ21 | 362 | 179（49%） | 270（75%） |
+| Boeing787 | 454 | 275（61%） | 341（75%） |
+| other | 1041 | 568（55%） | 833（80%） |
+| A320/321、A330 | 52、31 | 全部 | 全部 |
+
+val 与 test 来自相同场景的重叠切片：用 trainval 训练后，test 中"见过"的目标从 50% 升到 77%，最难的 737 从 23% 升到 72%。
+按 A 口径下的点统计（见过的目标定位且判对约 0.89，未见过约 0.22）粗算，加权比例从约 0.56 升到约 0.74；
+这只是方向性估计，不等于 AP，实际以 B baseline 的 test 结果为准。它同时解释了：test 上 737 最差、val 与 test 的大差距、
+以及按官方 trainval 训练的文献（官方识别实验、SAR-Net）test 分数远高于我们 A 口径的原因。方案 B 是与文献可比的口径。
+
 配置：`deim_hgnetv2_m_sar_aircraft_trainval_102e_b28_old_server.yml`（只改训练标注与 `fixed_schedule`），
 `deim_hgnetv2_m_sar_aircraft_rem_trainval_102e_b28_old_server.yml`（只多 REM）。训练中每轮仍在 val 上评估，
 但 val 已在训练集内，这些数字只用于观察曲线，不用于选权重；`best_stg*.pth` 不使用。
