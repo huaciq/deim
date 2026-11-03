@@ -135,6 +135,56 @@ test 焦点对：Boeing737→Boeing787、A220→other、A220→ARJ21、other→A
 每图背景电平、饱和像素比例、斑点等效视数在 train/val/test 间的分布；每个目标的目标/杂波对比度按类别、
 按判对判错的分布；由框内强散射估计的主轴朝向与判错的关系；重叠切片的定量检查。
 
+### SAR 特性检查工具
+
+`tools/analyze_sar_characteristics.py` 读原始 COCO 标注与原图（train/val/test），可选读入已有诊断目录的
+baseline/REM 预测，只用 CPU，输出到新目录（已存在则报错，不覆盖）：
+
+| 节 | 内容 | 用来判断 |
+|---|---|---|
+| 1 | 同图同时含两类时的 max(w,h) 比：787/737、A330/A320、A330/737、787/A330、A220/ARJ21、737/A320 | 787/737 若接近 1 而 A330/A320 约 1.5 → 787 框偏小或标签有误；787/A330 应接近 1 |
+| 2 | 每图背景电平（GT 外像素中位数）、p99、饱和/零值比例、斑点等效视数，按划分与源图尺寸 | train/val/test 的量化拉伸是否不同 |
+| 3 | 每个目标的 TCR（框内最亮 10% 均值 / 周围杂波环中位数，dB），按划分与类别 | 787（及 A220）是否系统性地散射更弱 |
+| 4 | 诊断划分上判对/判错/漏检的 TCR 与背景；按整图背景、TCR（train 三分位）和强散射主轴方向分组的型号正确率 | 错误是否跟着整图明暗、目标对比度或朝向走 |
+| 5 | 24×24 框内裁剪的归一化相关（尺寸差 ≤10%，不同图像）找重复目标：各划分去重数、与 train 的匹配数、baseline 判错实例去重数 | 重叠切片有多少；test/val 是否与 train 重叠 |
+
+`targets.csv`、`images.csv` 保留逐目标、逐图数值，便于后续再分析。主轴方向只在轴比 ≥1.5 时计入（十字形飞机常无确定主轴）。
+像素按存储值处理，dB 假设为幅度图。
+
+服务器命令（旧服务器；更新代码与环境激活同上）：
+
+```bash
+export DIAG_TEST=/data2/zxy/sar/experiments/diagnostics/替换为rem102_comparison_test目录
+export DIAG_VAL=/data2/zxy/sar/experiments/diagnostics/替换为rem102_comparison_val目录
+export SARCHK=/data2/zxy/sar/experiments/diagnostics/sar_characteristics_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)
+nohup env CUDA_VISIBLE_DEVICES= PYTHONUNBUFFERED=1 nice -n 19 python tools/analyze_sar_characteristics.py \
+  --data-root /home/zxy/sar/datasets/SAR-AIRcraft-1.0 --output "$SARCHK" \
+  --diag "$DIAG_TEST" --diag "$DIAG_VAL" \
+  > "$SARCHK.console.log" 2>&1 < /dev/null &
+PID=$!
+printf '%s\n' "$PID" > "$SARCHK.pid"
+disown "$PID"
+tail -f "$SARCHK.console.log"
+```
+
+进度：依次打印 `measured train/val/test`，最后打印 `report.md` 路径。重连后查看：
+
+```bash
+export SARCHK=/data2/zxy/sar/experiments/diagnostics/替换为sar_characteristics目录
+ps -p "$(cat "$SARCHK.pid")" -o pid,etime,args
+tail -n 5 "$SARCHK.console.log"
+cat "$SARCHK/report.md"
+```
+
+中断后换一个新的 `SARCHK` 重跑即可（不续算，不覆盖）。打包下载：
+
+```bash
+tar -czf "$SARCHK.tar.gz" -C "$(dirname "$SARCHK")" "$(basename "$SARCHK")"
+ls -lh "$SARCHK.tar.gz"
+```
+
+解压到 `C:\project\实验记录\sar_characteristics\`。
+
 **对路线的影响**
 
 - 首选方向：**成像条件一致性。** 训练时对同一图像生成 SAR 风格的辐射与分辨率退化视图（动态范围/gamma、
@@ -156,4 +206,6 @@ test 焦点对：Boeing737→Boeing787、A220→other、A220→ARJ21、other→A
 
 Windows Conda `pytorch`（CPU）：`tests/test_confusion_cues.py` 在合成诊断目录上检查真类名次与分数差、
 AUC（含并列）、相对尺寸、离散度和裁剪图输出；`tests/test_type_confusion.py` 仍通过。
+`tests/test_sar_characteristics.py` 在合成斑点场景上检查同图尺寸比、TCR 排序、判错实例的结果分组、
+重复目标去重与 train 匹配、主轴方向以及输出目录不覆盖。
 未在服务器真实诊断目录上运行，尚无结果。
