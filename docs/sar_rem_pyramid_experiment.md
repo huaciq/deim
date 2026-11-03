@@ -153,6 +153,23 @@ REM 没有改变这些混淆（737→787 为 108 个）。这是 val 不能反�
    等 REM-Pyramid 结果出来后，在胜出的 REM 版本上做一次 102 轮组合，作为第二模块的第一个候选。
 4. 评估 REM-Pyramid 时同时看 test 的 Boeing737 / A220 / ARJ21 各类 AP，以及 737→787 混淆数，而不只看 7 类平均。
 
+### 2.3 REM-Pyramid 结果：未达标，停止
+
+运行 `rem_pyramid_58e_b28_old_server_seed0_20261102_211610_1NjWJE`（用户下载的 `C:\project\实验记录\rem_h\`）：
+最佳 val 在 epoch 42（best_stg1）。
+
+| 58 轮 | val AP | test AP | AP50 | AP75 | APm | APl |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | 63.08 | 46.18 | 67.27 | 51.52 | 45.40 | 50.72 |
+| REM（stride 8） | 64.22 | 47.10 | 67.97 | 52.29 | 46.79 | 51.60 |
+| REM-Pyramid（8/16/32） | 62.92 | 46.29 | 67.67 | 49.94 | 46.26 | 51.03 |
+
+test 各类 AP：A220 42.23、A320/321 64.16、A330 76.48、ARJ21 34.24、Boeing737 25.02、Boeing787 40.03、other 41.89。
+
+按第 3 节判定（< 47.1）：多层级无益，val 与 test 都低于单层 REM，AP75 还比 baseline 低 1.58。
+主模块保持 stride-8 REM；s8+s16 消融不再运行。REM 在 102 轮的 test 增益（+1.57）大于 58 轮（+0.92），
+后续主实验改在 102 轮协议下进行，下一组为 [REM + CLCR-Lite 102 轮](sar_rem_clcr_lite_102e_experiment.md)。
+
 ## 3. REM-Pyramid 实现与配置
 
 `HybridEncoder.rem_feat_indices`（默认 `[0]`）选择接 REM 的投影层；索引 0/1/2 对应 stride 8/16/32。
