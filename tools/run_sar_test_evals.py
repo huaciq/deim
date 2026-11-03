@@ -110,6 +110,10 @@ def main():
     parser.add_argument('--plan-only', action='store_true', help='write plan.tsv and stop without evaluating')
     args = parser.parse_args()
 
+    for run in args.run:
+        # An unset shell variable passes --run "" and would resolve to the current directory.
+        if not run or not (Path(run) / 'resolved_config.yml').is_file() or not (Path(run) / 'log.txt').is_file():
+            parser.error(f'--run {run!r} is not a run directory with resolved_config.yml and log.txt')
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     batch = output.name
