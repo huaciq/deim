@@ -79,6 +79,34 @@ class PadToSize(T.Pad):
 
 
 @register()
+class PadToCanvas(T.Transform):
+    """Pad right/bottom to a fixed canvas so a later fixed Resize applies one scale to every image.
+
+    Boxes keep their coordinates (top-left aligned) and ``orig_size`` becomes the canvas
+    size, so the postprocessor maps normalized predictions back to original-image pixels.
+    """
+    def __init__(self, size=1500, fill=0) -> None:
+        super().__init__()
+        self.size = (size, size) if isinstance(size, int) else tuple(size)  # (width, height)
+        self.fill = fill
+
+    def forward(self, *inputs: Any) -> Any:
+        sample = inputs if len(inputs) > 1 else inputs[0]
+        image, target, *rest = sample
+        width, height = image.size if isinstance(image, PIL.Image.Image) else image.shape[-1:-3:-1]
+        canvas_w, canvas_h = self.size
+        if width > canvas_w or height > canvas_h:
+            raise ValueError(f'image {width}x{height} exceeds canvas {canvas_w}x{canvas_h}')
+        padding = [0, 0, canvas_w - width, canvas_h - height]
+        image = F.pad(image, padding=padding, fill=self.fill)
+        target = dict(target)
+        if 'boxes' in target:
+            target['boxes'] = F.pad(target['boxes'], padding=padding)
+        target['orig_size'] = torch.as_tensor([canvas_w, canvas_h])
+        return (image, target, *rest)
+
+
+@register()
 class RandomIoUCrop(T.RandomIoUCrop):
     def __init__(self, min_scale: float = 0.3, max_scale: float = 1, min_aspect_ratio: float = 0.5, max_aspect_ratio: float = 2, sampler_options: Optional[List[float]] = None, trials: int = 40, p: float = 1.0):
         super().__init__(min_scale, max_scale, min_aspect_ratio, max_aspect_ratio, sampler_options, trials)

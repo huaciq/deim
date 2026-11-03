@@ -1,0 +1,61 @@
+# Scheme B main protocol (B-v1): official trainval -> test, uniform-scale 1024 canvas.
+# See docs/sar_protocol_b.md. Initialize with tools/init_head_from_coco_class.py output (-t).
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_b_canvas1024_132e_b12/seed0
+experiment_protocol_document: docs/sar_protocol_b.md
+
+# val is inside trainval: no val-selected reload; report final.pth on test.
+fixed_schedule: True
+
+# Every image padded to 1500x1500 (largest source size) then resized: one scale 1024/1500 for all.
+eval_spatial_size: [1024, 1024]
+
+optimizer:
+  type: AdamW
+  params:
+    - params: '^(?=.*backbone)(?!.*bn).*$'
+      lr: 0.000023
+    - params: '^(?=.*(?:norm|bn)).*$'
+      weight_decay: 0.0
+  lr: 0.00023
+  betas: [0.9, 0.999]
+  weight_decay: 0.0001
+
+# 132 epochs, DEIM rule: flat = 4 + epochs // 2, last 12 epochs without augmentation.
+epoches: 132
+flat_epoch: 70
+no_aug_epoch: 12
+# Quadratic warmup over about 2 epochs (ceil(3489 / 12) = 291 iterations per epoch).
+warmup_iter: 600
+
+train_dataloader:
+  total_batch_size: 12  # GLOBAL: 6 per GPU with CUDA_VISIBLE_DEVICES=0,1.
+  dataset:
+    ann_file: /home/zxy/sar/datasets/SAR-AIRcraft-1.0/COCO/trainval.json
+    transforms:
+      # No Mosaic (per-image resize breaks the common scale), no photometric jitter (single-channel SAR).
+      ops:
+        - {type: RandomHorizontalFlip}  # before padding, so image content stays top-left as at test time
+        - {type: PadToCanvas, size: 1500, fill: 0}
+        - {type: Resize, size: [1024, 1024]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        epoch: [4, 70, 120]
+        ops: ['Mosaic', 'RandomPhotometricDistort']
+  collate_fn:
+    base_size: 1024  # batch-level multi-scale 768-1280 (same scale for every image in a batch)
+    base_size_repeat: 6
+    mixup_epochs: [4, 70]
+    stop_epoch: 120
+
+val_dataloader:
+  total_batch_size: 32
+  dataset:
+    transforms:
+      ops:
+        - {type: PadToCanvas, size: 1500, fill: 0}
+        - {type: Resize, size: [1024, 1024]}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
