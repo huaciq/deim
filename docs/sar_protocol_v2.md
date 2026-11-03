@@ -140,6 +140,13 @@ val 与 test 来自相同场景的重叠切片：用 trainval 训练后，test �
 这只是方向性估计，不等于 AP，实际以 B baseline 的 test 结果为准。它同时解释了：test 上 737 最差、val 与 test 的大差距、
 以及按官方 trainval 训练的文献（官方识别实验、SAR-Net）test 分数远高于我们 A 口径的原因。方案 B 是与文献可比的口径。
 
+**PGD（文献 SOTA，mAP 90.7）的评估集合核查**：论文只写了 3047 / 442 / 879 的划分与"mAP"，没写训练是否并入 val、
+也没写在哪个集合上报告（仅图注提到 test data）。官方代码 https://github.com/XAI4SAR/PGD（README 称关键代码在录用后补全）：
+`data/SAR_PLANE.yaml` 有 train/val/test 三个列表；`train_PGD.py` 只读取 `train` 与 `val`，每轮在 val 上评估并按 val 选最优，
+训练后再在 val 上复评；`val.py` 默认 `--task val`，需显式 `--task test` 才评 test；打印 `mAP@.5` 与 `mAP@.5:.95`。
+即 PGD 只用 train 训练，按代码默认流程报告的是 val 上的 mAP@0.5，与我们 val AP50（约 88）和其表中基线
+（YOLOv8 88.7、DINO 85.2）同档。论文未明确，以上为基于代码的推断，引用时应说明其评估集合未注明。
+
 配置：`deim_hgnetv2_m_sar_aircraft_trainval_102e_b28_old_server.yml`（只改训练标注与 `fixed_schedule`），
 `deim_hgnetv2_m_sar_aircraft_rem_trainval_102e_b28_old_server.yml`（只多 REM）。训练中每轮仍在 val 上评估，
 但 val 已在训练集内，这些数字只用于观察曲线，不用于选权重；`best_stg*.pth` 不使用。
