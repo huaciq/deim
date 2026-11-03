@@ -1,0 +1,125 @@
+# SAR-AIRcraft：协议 v2（训练 trick 调整与 A/B 训练方案）
+
+日期：2026-11-03。依据：[协议与训练设置调研](sar_aircraft_protocol_survey.md)、[型号混淆线索诊断](sar_confusion_cues_diagnosis.md)。
+旧的冻结 102 轮协议（640 输入，全局 batch 28）及其全部结果保持不变；v2 用新配置，Δ 只在同一协议内计算。
+
+## 1. 训练集合：推荐 A→B
+
+所有方案都在官方 test（879 张，2950 个目标）上报告，与文献一致。
+
+- **A（开发与消融）**：train 3047 张训练，官方 val 选权重，与 PGD 相同。v2 的各阶段筛选、模块消融都在 A 下做，
+  已有 640 结果可直接作对照。
+- **B（论文最终表）**：train + val（3489 张，13513 个目标）训练，与官方识别实验、SAR-Net 的"默认划分"相同，
+  轮数用 A 下定好的值，取最后一轮权重，不看 test 选权重。论文主表同时给出 A 与 B。
+
+B 需要的准备（等 v2 定型后再做）：合并 train/val 标注与 `stats.json`；当前 solver 只在无增强阶段之前更新
+`last.pth`，B 必须保存最后一轮权重，需要对 solver 做相应修改并复核其行为。
+
+## 2. 分阶段调整（均为方案 A，单因素）
+
+| 阶段 | 变量 | 配置 | 对照 | 采用条件 |
+|---|---|---|---|---|
+| 1（本次） | 输入 640 → 1024 | `deim_hgnetv2_m_sar_aircraft_1024_102e_b12_old_server.yml`；随后 `..._rem_1024_...` | 640 baseline：val 64.51 / test 45.74（AP50 65.37）；640 REM：test 47.31 | test AP 比 640 baseline 高 ≥1.5 → 采用 1024；0–1.5 → 再试 800 折中；<0 → 保留 640 |
+| 2 | 增强：去掉 `RandomPhotometricDistort`；另一组去掉 `RandomHorizontalFlip` | 阶段 1 结果出来后再写 | 阶段 1 选定的 baseline | val 与 test 同向变好才采用（单种子，差异 <1 AP 视为不确定） |
+| 3 | 轮数 102 → 约 150 | 同上 | 阶段 2 选定配置 | 同上 |
+| 4 | 冻结 v2；重跑 REM 等候选模块；关键结论补 2–3 个种子 | — | v2 baseline | — |
+| 5 | 方案 B 最终训练 | — | — | — |
+
+阶段 1 只改分辨率以及它直接带来的变化，其余全部继承冻结 102 轮协议（`tests/test_sar_protocol_v2.py` 检查）：
+
+| 项目 | 640（冻结） | 1024（v2 阶段 1） | 说明 |
+|---|---|---|---|
+| 训练 / 验证尺寸 | 640；多尺度 480–800 | 1024；多尺度 768–1280 | `generate_scales` 同一规则 |
+| Mosaic 输出 | 320 | 512 | 保持为输入的一半 |
+| 全局 batch | 28（每卡 14） | 12（每卡 6） | 显存约随像素数增长 2.6 倍 |
+| 主 LR / 骨干 LR | 3.5e-4 / 3.5e-5 | 2.3e-4 / 2.3e-5 | AdamW 按 sqrt(12/28) 缩放 |
+| warmup | 2000 iter（约 18.3 轮） | 4660 iter（同样约 18.3 轮） | 每轮迭代数 109 → 254 |
+| 验证 batch | 64 | 32 | 只影响显存 |
+
+不变：DEIM-D-FINE-M，COCO M 权重 `-t`，seed 0，102 轮，flat 49、no_aug 12，policy [4,49,90]，mixup [4,49]，stop 90，
+WD 1e-4，EMA 0.9999，AMP FP16 + FP32 loss/retry，关闭 ZoomOut/IoUCrop，按 val AP 选权重并报告 test。
+
+batch 与 LR 随分辨率一起变，阶段 1 的差异不完全等于分辨率本身的作用；这是显存约束下的必要代价，在论文中如实说明。
+每卡 6 张在 1280 尺度下的显存没有实测；若首个多尺度 epoch 出现 OOM，告知后改为全局 batch 8 的配置。
+
+## 3. 服务器命令（旧服务器）
+
+更新代码与环境：
+
+```bash
+cd /home/zxy/sar/repos/deim
+git status --short --branch
+git fetch origin
+git switch main
+git pull --ff-only origin main
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate deim_zxy
+```
+
+工作区有改动或分叉时先查看，不要 reset。数据已就绪，不需要准备。
+
+启动阶段 1 baseline（两卡空闲时；启动器检查 GPU、新建目录、保存解析配置 / Git revision / 协议，
+以 `nohup ... > console.log 2>&1 < /dev/null &` 启动并保存 PID 后 `disown`，打印 `STARTED OUT=...`）：
+
+```bash
+nvidia-smi -i 0,1
+export EXPERIMENT_ROOT=/home/zxy/sar/experiments
+export INITIAL_WEIGHTS=/home/zxy/sar/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth
+bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_1024_102e_b12_old_server.yml
+```
+
+baseline 结束后启动 REM（同样的环境变量）：
+
+```bash
+bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_rem_1024_102e_b12_old_server.yml
+```
+
+监控（重连后先设置 `OUT` 并激活环境）：
+
+```bash
+export OUT=/home/zxy/sar/experiments/替换为启动器打印的目录
+tail -f "$OUT/console.log"
+ps -p "$(cat "$OUT/launcher.pid")" -o pid,etime,args
+nvidia-smi -i 0,1
+tail -n 3 "$OUT/log.txt"
+python - "$OUT/log.txt" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.startswith('{')]
+best = max(rows, key=lambda r: r['test_coco_eval_bbox'][0])
+for r in rows[-3:] + [best]:
+    v = r['test_coco_eval_bbox']
+    print(r['epoch'], 'val AP', round(v[0] * 100, 2), 'AP50', round(v[1] * 100, 2), 'AP75', round(v[2] * 100, 2))
+PY
+tensorboard --logdir "$OUT/summary" --host 0.0.0.0 --port 6006
+```
+
+只在进程已停止时恢复：
+
+```bash
+bash tools/run_sar_module_experiment.sh --resume "$OUT"
+```
+
+`last.pth` 只在 epoch < 90 时更新，不是最终权重；`best_stg1.pth` / `best_stg2.pth` 按 val AP 保存，选择时以日志中最佳 val AP 的轮次为准。
+
+训练完成后按 val 选权重评估 test（评估沿用该运行自己的 1024 配置）：
+
+```bash
+export TESTBATCH=/home/zxy/sar/experiments/test_evals_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)
+ulimit -Sn 65535
+nohup python tools/run_sar_test_evals.py --run "$OUT" \
+  --data-root /home/zxy/sar/datasets/SAR-AIRcraft-1.0 --output "$TESTBATCH" \
+  > "$TESTBATCH.console.log" 2>&1 < /dev/null &
+PID=$!
+printf '%s\n' "$PID" > "$TESTBATCH.pid"
+disown "$PID"
+tail -f "$TESTBATCH.console.log"
+cat "$TESTBATCH/summary.md"
+```
+
+把 `summary.md` 和最佳 val 轮次贴回即可。
+
+## 4. 本地验证
+
+Windows Conda `pytorch`（CPU）：`tests/test_sar_protocol_v2.py` 解析两个新配置，检查 1024 baseline 相对冻结 102 轮协议
+只改了上表中的项目、多尺度范围为 768–1280、LR 与 warmup 的换算，以及 REM 版本只多 `use_rem`。未在服务器运行，没有训练结果，
+显存占用未知。

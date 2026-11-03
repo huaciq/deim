@@ -1,0 +1,7 @@
+# Protocol v2 stage 1: stride-8 REM at 1024 input; differs from the 1024 baseline only by REM.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_1024_102e_b12_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_rem_1024_102e_b12/seed0
+
+HybridEncoder:
+  use_rem: True
