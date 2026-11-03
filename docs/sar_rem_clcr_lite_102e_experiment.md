@@ -13,6 +13,38 @@
 
 本组回答：在 102 轮 REM 之上，CLCR-Lite 能否再加 1.0 以上。对照为 102 轮 REM（test 47.31，val 65.22）。
 
+## 结果（2026-11-03）：不能叠加，停止 CLCR-Lite
+
+运行 `/data2/zxy/sar/experiments/deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_rem_clcr_lite_102e_b28_old_server_seed0_20261103_102028_MOSNxK`，
+最佳 val 在 epoch 82（best_stg1）；test 由 `tools/run_sar_test_evals.py` 评估（879 张）。
+
+| 102 轮 | val AP | test AP | AP50 | AP75 | APm | APl |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | 64.51 | 45.74 | 65.37 | 51.42 | 46.82 | 43.11 |
+| REM | 65.22 | **47.31** | 67.17 | 53.05 | 46.36 | 49.03 |
+| CLCR-Lite | 64.54 | 46.43 | 67.06 | 51.76 | 47.39 | 45.14 |
+| REM+CLCR-Lite | 64.67 | 45.42 | 64.51 | 49.88 | 46.12 | 45.24 |
+
+按判定（< 47.31）停止 CLCR-Lite：58 轮（45.98 对 REM 47.10）和 102 轮两次组合都低于 REM 单模块，
+102 轮还低于 baseline。
+
+test 各类 AP 与 REM 的差（REM 取 102 轮配对诊断导出，每卡 batch 8，与 `--test-only` 口径有约 0.3 AP 的差别）：
+
+| 类别 | test GT | REM | REM+CLCR-Lite | 差 |
+|---|---:|---:|---:|---:|
+| A220 | 460 | 41.24 | 43.35 | +2.11 |
+| A320/321 | 52 | 66.84 | 55.33 | −11.51 |
+| A330 | 31 | 82.87 | 82.75 | −0.12 |
+| ARJ21 | 362 | 36.46 | 30.26 | −6.20 |
+| Boeing737 | 550 | 23.02 | 24.40 | +1.38 |
+| Boeing787 | 454 | 41.28 | 39.77 | −1.51 |
+| other | 1041 | 41.81 | 42.09 | +0.28 |
+
+A320/321 一类就让 7 类平均下降约 1.6。按 [重复目标检查](sar_confusion_cues_diagnosis.md)，test 中没见过的飞机里
+没有 A320/321 与 A330，这两类的 83 个 GT 全部是 train 中出现过的飞机的重叠切片；REM 的 +1.57 里约 +1.44 也来自这两类。
+单次运行中这两类的大幅波动反映的是对见过目标的记忆差异，1 AP 量级的模块比较在这个测试集上需要多种子才能判定。
+后续路线按 [协议调研](sar_aircraft_protocol_survey.md) 第 4 节，先确定输入尺寸等基准设置。
+
 ## 配置
 
 `configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_rem_clcr_lite_102e_b28_old_server.yml`：
