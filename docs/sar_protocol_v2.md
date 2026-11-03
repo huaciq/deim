@@ -74,7 +74,26 @@ ARJ21 35.03 / 37.11，Boeing737 22.07 / 23.29，Boeing787 34.56 / 42.43，other 
 - AR100 更高（70.60 对 68.92）、APl 更高，AP50 更低，787 降 7.9：框找到得更多，型号判别没有变好。
 - `final.pth` 与 val 选出的 best_stg2 在 test 上几乎相同（45.0 对 45.00），是"固定日程取最后一轮"规则的第一个支持点。
 
-下一步先对比 640 baseline 同轮次的 val 曲线，区分"1024 本身无益"和"小 batch、低 LR 导致训练不足"。
+**与 640 同轮次 val 曲线对比：1024 是训练不足，不是分辨率无益的定论。**
+
+| 轮次段 | 640 val AP 均值 | 1024 val AP 均值 |
+|---|---:|---:|
+| 40–49 | 57.15 | 50.50 |
+| 60–69 | 64.03 | 56.90 |
+| 80–89 | 64.44 | 60.71 |
+| 90–101 | 64.47（第 60 轮后基本走平） | 62.05（仍在上升） |
+
+两者起步同样慢（warmup 都约 18 轮，第 15 轮 val 分别为 8.55 / 5.58），差别出现在第 25 轮之后：640 在约第 65 轮走平，
+1024 每段仍涨 1–3 AP。原因最可能是 batch 12、主 LR 2.3e-4 下收敛更慢，而不是 1024 本身。
+
+**阶段 1b：800 输入，全局 batch 20**（`deim_hgnetv2_m_sar_aircraft_800_102e_b20_old_server.yml`）。按 1024 运行的峰值显存
+（13.4 GB/卡，每卡 6 张，最大 1280）按像素换算，800 的最大尺度 992 下每卡 10 张约同量级。batch 与 LR 更接近冻结协议
+（LR 3.0e-4，sqrt(20/28) 缩放；warmup 2810 iter 仍约 18.3 轮；Mosaic 400；多尺度 576–992），干扰更少，速度约为 1024 的一半多。
+
+判定（对照 640 baseline test 45.74）：test ≥ 47.24 → 采用 800；45.74–47.24 → 看 val 曲线是否走平，未走平则阶段 3 延长轮数时
+同时比较 640 与 800；< 45.74 → 保留 640，进入阶段 2。1024 暂不再跑，若 800 有收益且未收敛，再考虑 1024 + 更长日程。
+
+另一个共性问题：两种分辨率前 15 轮 val 都很低，18 轮 warmup 占了训练的 1/6。缩短 warmup 是潜在 trick，放到阶段 2/3 单独检验。
 
 ## 3. 服务器命令（旧服务器）
 
@@ -101,6 +120,14 @@ export EXPERIMENT_ROOT=/home/zxy/sar/experiments
 export INITIAL_WEIGHTS=/home/zxy/sar/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth
 bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_1024_102e_b12_old_server.yml
 ```
+
+阶段 1b（800）启动：
+
+```bash
+bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_800_102e_b20_old_server.yml
+```
+
+（1024 已完成；下面的 1024 REM 暂缓，等分辨率定下来再跑对应分辨率的 REM。）
 
 baseline 结束后启动 REM（同样的环境变量）：
 

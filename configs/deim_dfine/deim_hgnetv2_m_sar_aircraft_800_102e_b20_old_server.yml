@@ -1,0 +1,48 @@
+# Protocol v2 stage 1b: the frozen 102-epoch SAR baseline at 800 input (scheme A: train / val).
+# 1024 with batch 12 was still improving at epoch 101; 800 keeps batch and LR close to the
+# frozen protocol. Only resolution and what it forces change; see docs/sar_protocol_v2.md.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_102e_b28_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_800_102e_b20/seed0
+experiment_protocol_document: docs/sar_protocol_v2.md
+
+eval_spatial_size: [800, 800]
+
+# Global batch 28 -> 20 for memory; AdamW LR scaled by sqrt(20/28).
+optimizer:
+  type: AdamW
+  params:
+    - params: '^(?=.*backbone)(?!.*bn).*$'
+      lr: 0.00003
+    - params: '^(?=.*(?:norm|bn)).*$'
+      weight_decay: 0.0
+  lr: 0.0003
+  betas: [0.9, 0.999]
+  weight_decay: 0.0001
+
+# Same warmup length in epochs: 2000 iters x ceil(3047/28) -> x ceil(3047/20).
+warmup_iter: 2810
+
+train_dataloader:
+  total_batch_size: 20  # GLOBAL: 10 per GPU with CUDA_VISIBLE_DEVICES=0,1.
+  dataset:
+    transforms:
+      ops:
+        - {type: Mosaic, output_size: 400, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5], probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [800, 800]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+  collate_fn:
+    base_size: 800  # multi-scale 576-992 until stop_epoch
+
+val_dataloader:
+  total_batch_size: 32  # evaluation memory only; metrics do not depend on it
+  dataset:
+    transforms:
+      ops:
+        - {type: Resize, size: [800, 800]}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}

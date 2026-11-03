@@ -43,6 +43,30 @@ class ProtocolV2StageOneTests(unittest.TestCase):
         new['train_dataloader']['collate_fn'] = dict(new['train_dataloader']['collate_fn'], base_size=640)
         self.assertEqual(new, old)
 
+    def test_800_baseline_changes_only_resolution_bound_settings(self):
+        new, raw = resolved('800_102e_b20')
+        old, _ = resolved('102e_b28')
+        self.assertTrue((ROOT / raw['experiment_protocol_document']).is_file())
+        self.assertEqual(new['eval_spatial_size'], [800, 800])
+        train, val = new['train_dataloader'], new['val_dataloader']
+        self.assertEqual(train['total_batch_size'], 20)
+        ops = {op['type']: op for op in train['dataset']['transforms']['ops']}
+        self.assertEqual((ops['Mosaic']['output_size'], ops['Resize']['size']), (400, [800, 800]))
+        self.assertEqual(val['dataset']['transforms']['ops'][0], dict(type='Resize', size=[800, 800]))
+        scales = generate_scales(train['collate_fn']['base_size'], train['collate_fn']['base_size_repeat'])
+        self.assertEqual((min(scales), max(scales)), (576, 992))
+        self.assertAlmostEqual(new['optimizer']['lr'], round(3.5e-4 * (20 / 28) ** .5, 4))
+        self.assertAlmostEqual(new['optimizer']['params'][0]['lr'], new['optimizer']['lr'] / 10)
+        self.assertEqual(new['warmup_iter'], round(2000 / -(-3047 // 28) * -(-3047 // 20), -1))
+
+        for key in ('eval_spatial_size', 'optimizer', 'warmup_iter'):
+            new[key] = old[key]
+        for loader in ('train_dataloader', 'val_dataloader'):
+            new[loader] = dict(new[loader], total_batch_size=old[loader]['total_batch_size'])
+            new[loader]['dataset'] = dict(new[loader]['dataset'], transforms=old[loader]['dataset']['transforms'])
+        new['train_dataloader']['collate_fn'] = dict(new['train_dataloader']['collate_fn'], base_size=640)
+        self.assertEqual(new, old)
+
     def test_rem_1024_adds_only_rem(self):
         rem, _ = resolved('rem_1024_102e_b12')
         base, _ = resolved('1024_102e_b12')
