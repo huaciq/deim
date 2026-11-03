@@ -111,6 +111,10 @@ class DetSolver(BaseSolver):
                     checkpoint_paths.append(self.output_dir / f'checkpoint{epoch:04}.pth')
                 for checkpoint_path in checkpoint_paths:
                     dist_utils.save_on_master(self.state_dict(), checkpoint_path)
+            if self.output_dir and epoch == args.epoches - 1:
+                # Weights at the end of the schedule, saved before the val-driven
+                # stage-2 reload below can replace them; training is unaffected.
+                dist_utils.save_on_master(self.state_dict(), self.output_dir / 'final.pth')
 
             module = self.ema.module if self.ema else self.model
             test_stats, coco_evaluator = evaluate(
