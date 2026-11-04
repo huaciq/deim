@@ -29,7 +29,7 @@
   （可分性 0.51–0.64），这一项对它们的帮助预计有限。
 - 800 图补边后有效区域只占画布 28%，计算有浪费；这是统一尺度的代价。
 - 一次同时改了多项设定，作为"协议"整体与旧配方比较；单项贡献如需写入论文，再在此协议上做去掉单项的消融。
-- 预计每轮约 2.6 分钟（291 iter），132 轮约 5.5–6 小时；显存与已测 1024 运行相同（张量尺寸一致）。
+- 预计每轮约 2.6 分钟（290 iter），132 轮约 5.5–6 小时；显存与已测 1024 运行相同（张量尺寸一致）。
 
 ## 1.1 B-v1 baseline 结果（seed 0）
 
@@ -116,7 +116,7 @@ grep -E "Epoch: \[[0-9]+\]" "$OUT/console.log" | tail -n 1 | grep -oE "Epoch: \[
 grep -iE "out of memory|Traceback" "$OUT/console.log" | tail -n 3
 ```
 
-`Load model.state_dict` 一行里 `unmatched` 应为空（类别头尺寸与 7 类一致，已加载）。每轮应为 291 iter。
+`Load model.state_dict` 一行里 `unmatched` 只应有 `decoder.anchors`、`decoder.valid_mask`（按 1024 重新生成的缓冲区，尺寸与 COCO 640 不同），类别头不应出现。每轮应为 290 iter（`drop_last`）。
 
 监控：
 
@@ -177,7 +177,9 @@ PY
 
 旧服务器 GPU 被占时的单次运行，不改变默认服务器。配置 `deim_hgnetv2_m_sar_aircraft_b_canvas1024_rem_132e_b12_new_server.yml`
 与旧服务器版只差路径；新服务器路径见 `AGENTS.md`，初始化权重同样由 `tools/init_head_from_coco_class.py` 生成。
-B-v1 基线在旧服务器上运行，比较时注意两台机器的软件版本可能不同。
+B-v1 基线在旧服务器上运行，比较时注意两台机器的软件版本可能不同；新服务器为 torch 2.1.2、torchvision 0.16.2。
+
+运行：`/root/zxy/experiments/deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_b_canvas1024_rem_132e_b12_new_server_seed0_20261104_102922_JpWE66`（revision `aef3c03`，GPU 0、1）。
 
 ## 4. 本地验证
 
