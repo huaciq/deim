@@ -73,6 +73,20 @@ class ProtocolBTests(unittest.TestCase):
         self.assertTrue(new['val_dataloader']['dataset']['ann_file'].startswith('/root/zxy/datasets/'))
         self.assertEqual(new['train_dataloader']['dataset']['transforms']['ops'][1]['type'], 'SpeckleResample')
 
+    def test_rot90_adds_only_rot90(self):
+        skip = ('__include__', 'output_dir')
+        base = {k: v for k, v in load_config(str(CONFIG), {}).items() if k not in skip}
+        rotated = load_config(str(CONFIG.with_name(CONFIG.name.replace('_132e', '_rot90_132e'))), {})
+        rotated = {k: v for k, v in rotated.items() if k not in skip}
+        transforms = rotated['train_dataloader']['dataset']['transforms']
+        self.assertEqual(transforms['ops'].pop(1), dict(type='RandomRot90', p=.5, angles=[90, 180, 270]))
+        self.assertEqual(transforms['policy']['ops'].pop(), 'RandomRot90')
+        self.assertEqual(rotated, base)
+        new = load_config(str(CONFIG.with_name(CONFIG.name.replace('_132e', '_rot90_132e').replace('old_server', 'new_server'))), {})
+        self.assertTrue(new['train_dataloader']['dataset']['ann_file'].startswith('/root/zxy/datasets/'))
+        self.assertTrue(new['val_dataloader']['dataset']['ann_file'].startswith('/root/zxy/datasets/'))
+        self.assertEqual(new['train_dataloader']['dataset']['transforms']['ops'][1]['type'], 'RandomRot90')
+
     def test_canvas_gives_every_image_the_same_scale(self):
         for side in (800, 1500):
             image = PIL.Image.new('RGB', (side, side), 30)

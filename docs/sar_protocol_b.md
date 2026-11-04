@@ -158,6 +158,21 @@ revision `aef3c03`，torch 2.1.2、torchvision 0.16.2，`final.pth` 在 test 上
 - REM 多检出了目标（没见过的 ARJ21 定位率 0.207→0.380），但型号变差；737→787 翻倍，787 的见过 AP50 从 97.63 掉到 89.40，几乎解释了全部下降。
 - 单种子、两台服务器（B-v1 在旧服务器）。用户此前在两台服务器上跑过相同实验，波动不大，因此决定按失败处理，不再跟进 REM（2026-11-04）。
 
+## 1.5 90° 旋转 R（方法，不是协议的一部分）
+
+`RandomRot90`（`engine/data/transforms/_transforms.py`）在翻转之后、补边之前作用，概率 0.5，从 90°、180°、270° 中均匀选一个，第 4–119 轮生效，最后 12 轮保持原朝向。
+配置 `deim_hgnetv2_m_sar_aircraft_b_canvas1024_rot90_132e_b12_{old,new}_server.yml` 相对 B-v1 只多这一项。参数在训练前定下，之后不按 test 调。
+
+- **动机**：trainval 的停放朝向集中（§1.2、调研文档 §7.2），没见过的飞机朝向越少见越容易漏检。不加新数据时，这是最直接的扩充朝向的办法。
+- **为什么只用 90° 的倍数**：框保持紧贴、尺度不变，不破坏统一画布。任意角度只有水平框标注时会把框撑大。
+- **覆盖范围**：与现有水平翻转组合覆盖全部 8 种朝向。竖直翻转 = 水平翻转 + 旋转 180°，所以不单独加。
+
+局限：
+
+- 旋转 90° 和 270° 会交换距离向与方位向，飞机相对雷达的方位和阴影方向也随之改变，物理上不严格。如果 R 有效，再跑 `angles: [180]` 的消融，它只含翻转组合，不交换两个方向。
+- 朝向与漏检的关联只是相关，分类别也不一致（other 强、ARJ21 弱、737 相反），R 不一定能解决 ARJ21。
+- 判定与 A 相同：没见过子集的定位率和 AP50 要上升；只是见过子集下降则不采用；单种子 AP50 增益 <1 不算有效。另外按朝向常见程度分档看，少见档应改善最多。
+
 ## 2. 运行顺序
 
 基线命名为 DEIM-D-FINE-M（D-FINE 架构 + DEIM 的 MAL、MixUp 与 COCO 权重），不因后续结果更改。
@@ -339,6 +354,19 @@ bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sar_ai
 ```
 
 启动日志应出现 `### Transform @SpeckleResample ###`，`Policy_ops` 中有 `SpeckleResample`。第 4 轮起看 `data:` 是否明显变长。
+
+## 3.4 B-v1 + 90° 旋转
+
+旧服务器（两卡空闲时）；新服务器把配置换成 `..._rot90_132e_b12_new_server.yml`，路径按 §3.1。其余与 §3 的启动、监控、恢复和 test 评估相同，`OUT` 匹配 `*_b_canvas1024_rot90_132e_b12_*`。
+
+```bash
+nvidia-smi -i 0,1
+export EXPERIMENT_ROOT=/home/zxy/sar/experiments
+export INITIAL_WEIGHTS=/home/zxy/sar/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e_airplane7.pth
+bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_b_canvas1024_rot90_132e_b12_old_server.yml
+```
+
+启动日志应出现 `### Transform @RandomRot90 ###`，`Policy_ops` 中有 `RandomRot90`。
 
 ## 4. 本地验证
 

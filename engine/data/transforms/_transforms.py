@@ -108,6 +108,38 @@ class PadToCanvas(T.Transform):
 
 
 @register()
+class RandomRot90(T.Transform):
+    """Rotate a PIL image and its XYXY boxes counterclockwise by a multiple of 90 degrees.
+
+    Boxes stay tight and the scale does not change, unlike rotation by an arbitrary angle.
+    With a horizontal flip, angles (90, 180, 270) reach all eight orientations; (180,) reaches
+    only the flips, which keep the range and azimuth axes of the SAR image.
+    """
+    _TRANSPOSE = {90: PIL.Image.ROTATE_90, 180: PIL.Image.ROTATE_180, 270: PIL.Image.ROTATE_270}
+
+    def __init__(self, p=.5, angles=(90, 180, 270)) -> None:
+        super().__init__()
+        self.p, self.angles = p, tuple(angles)
+
+    def forward(self, *inputs: Any) -> Any:
+        sample = inputs if len(inputs) > 1 else inputs[0]
+        if float(torch.rand(1)) >= self.p:
+            return sample
+        image, target, *rest = sample
+        angle = self.angles[int(torch.randint(len(self.angles), (1,)))]
+        width, height = image.size
+        rotated = image.transpose(self._TRANSPOSE[angle])
+        target = dict(target)
+        x0, y0, x1, y1 = target['boxes'].as_subclass(torch.Tensor).unbind(-1)
+        corners = {90: (y0, width - x1, y1, width - x0),
+                   180: (width - x1, height - y1, width - x0, height - y0),
+                   270: (height - y1, x0, height - y0, x1)}[angle]
+        target['boxes'] = convert_to_tv_tensor(torch.stack(corners, -1), key='boxes', spatial_size=rotated.size[::-1])
+        target['orig_size'] = torch.as_tensor(rotated.size)
+        return (rotated, target, *rest)
+
+
+@register()
 class SpeckleResample(T.Transform):
     """Draw a new speckle realization for a stored SAR image; boxes and structure are unchanged.
 

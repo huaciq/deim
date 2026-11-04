@@ -1,0 +1,20 @@
+# Scheme B main protocol B-v1 + 90-degree rotation; differs from the B-v1 baseline only by RandomRot90.
+# See docs/sar_protocol_b.md section 1.5.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_b_canvas1024_132e_b12_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_b_canvas1024_rot90_132e_b12/seed0
+
+train_dataloader:
+  dataset:
+    transforms:
+      ops:
+        - {type: RandomHorizontalFlip}
+        - {type: RandomRot90, p: 0.5, angles: [90, 180, 270]}  # before padding, so image content stays top-left as at test time
+        - {type: PadToCanvas, size: 1500, fill: 0}
+        - {type: Resize, size: [1024, 1024]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        epoch: [4, 70, 120]  # RandomRot90 runs in epochs 4-119; the last 12 epochs keep the stored orientation
+        ops: ['Mosaic', 'RandomPhotometricDistort', 'RandomRot90']
