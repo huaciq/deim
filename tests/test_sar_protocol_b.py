@@ -45,6 +45,19 @@ class ProtocolBTests(unittest.TestCase):
         base['HybridEncoder'].pop('use_rem', None)
         self.assertEqual(rem, base)
 
+    def test_rem_new_server_changes_only_paths(self):
+        old = load_config(str(CONFIG.with_name(CONFIG.name.replace('_132e', '_rem_132e'))), {})
+        new = load_config(str(CONFIG.with_name(CONFIG.name.replace('_132e', '_rem_132e').replace('old_server', 'new_server'))), {})
+        for cfg in (old, new):
+            cfg.pop('__include__', None)
+            cfg.pop('output_dir')
+        for loader, name in (('train_dataloader', 'trainval.json'), ('val_dataloader', 'val.json')):
+            self.assertEqual(new[loader]['dataset'].pop('img_folder'), '/root/zxy/datasets/SAR-AIRcraft-1.0')
+            self.assertEqual(new[loader]['dataset'].pop('ann_file'), f'/root/zxy/datasets/SAR-AIRcraft-1.0/COCO/{name}')
+            old[loader]['dataset'].pop('img_folder')
+            old[loader]['dataset'].pop('ann_file')
+        self.assertEqual(new, old)
+
     def test_canvas_gives_every_image_the_same_scale(self):
         for side in (800, 1500):
             image = PIL.Image.new('RGB', (side, side), 30)
