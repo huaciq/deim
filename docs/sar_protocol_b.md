@@ -181,6 +181,43 @@ B-v1 基线在旧服务器上运行，比较时注意两台机器的软件版本
 
 运行：`/root/zxy/experiments/deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_b_canvas1024_rem_132e_b12_new_server_seed0_20261104_102922_JpWE66`（revision `aef3c03`，GPU 0、1）。
 
+## 3.2 错误拆解（B-v1 与之后的每个方法）
+
+`tools/diagnose_detection_errors.py` 只用 CPU，读 `tools/export_analysis_predictions.py` 导出的 test 预测，回答：
+AP50 丢在型号混淆、背景误检还是其余（漏检、定位差）；见过和没见过的目标各多少（相对 trainval，匹配器同 `check_split_overlap.py`）；
+没见过的飞机是没检出还是型号分数被分散（类别无关 AP50，决定 Q4）。只作诊断，不用于选权重，也不改官方指标。
+
+旧服务器上的 B-v1（`RUN` 换成别的运行目录即可诊断其他方法；导出约占每卡 8 张 1024 图的显存，几分钟）：
+
+```bash
+cd /home/zxy/sar/repos/deim
+git fetch origin
+git switch main
+git pull --ff-only origin main
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate deim_zxy
+export DATA=/home/zxy/sar/datasets/SAR-AIRcraft-1.0
+export RUN=/home/zxy/sar/experiments/deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_b_canvas1024_132e_b12_old_server_seed0_20261103_193451_xwONF9
+export DIAG=/home/zxy/sar/experiments/diagnostics/errors_bv1_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)
+mkdir -p "$DIAG"
+nvidia-smi -i 0,1
+CUDA_VISIBLE_DEVICES=0,1 PYTHONUNBUFFERED=1 nohup torchrun --standalone --nproc_per_node=2 tools/export_analysis_predictions.py \
+  -c "$RUN/resolved_config.yml" -r "$RUN/final.pth" --ann-file "$DATA/COCO/test.json" --batch-per-gpu 8 \
+  --output "$DIAG/predictions.json.gz" > "$DIAG/export.console.log" 2>&1 < /dev/null &
+PID=$!; printf '%s\n' "$PID" > "$DIAG/export.pid"; disown "$PID"
+tail -f "$DIAG/export.console.log"
+```
+
+显存不够时把 `--batch-per-gpu` 改小。导出结束后：
+
+```bash
+CUDA_VISIBLE_DEVICES= nice -n 19 python tools/diagnose_detection_errors.py \
+  --predictions "$DIAG/predictions.json.gz" --data-root "$DATA" --output "$DIAG/report"
+cat "$DIAG/report/report.md"
+```
+
+导出的 AP50 应与 §1.1 的 87.91 一致（只差 float32 与 float16 的舍入）。
+
 ## 4. 本地验证
 
 Windows Conda `pytorch`（CPU）：`tests/test_sar_protocol_b.py` 检查配置各项；`PadToCanvas` 对 800 与 1500 图补边后框坐标不变、
