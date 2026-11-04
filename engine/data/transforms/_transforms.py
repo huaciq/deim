@@ -5,6 +5,7 @@ Copyright(c) 2023 lyuwenyu. All Rights Reserved.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as NF
 
 import torchvision
 import torchvision.transforms.v2 as T
@@ -104,6 +105,77 @@ class PadToCanvas(T.Transform):
             target['boxes'] = F.pad(target['boxes'], padding=padding)
         target['orig_size'] = torch.as_tensor([canvas_w, canvas_h])
         return (image, target, *rest)
+
+
+@register()
+class SpeckleResample(T.Transform):
+    """Draw a new speckle realization for a stored SAR image; boxes and structure are unchanged.
+
+    Overlapping tiles repeat a target with identical speckle, which a detector can memorize.
+    Works on the stored values because their domain (amplitude, stretch) is not documented:
+    the looks L of the image are its median (block mean / block std)^2, the same statistic as
+    the measured ENL. A Lee weight k keeps strong scatterers and resamples homogeneous clutter:
+    new = R * (1 + (1 - k) * (s - 1)), R = m + k * (value - m), with m the local mean and s a
+    lognormal field of mean 1 and variance 1/L, blurred to match the speckle correlation of
+    the stored images (noise_sigma, tools/check_speckle_resampling.py). The plain Lee weight
+    pulls a small bright target towards m; structure_gain scales it so such pixels stay intact.
+    """
+    def __init__(self, p=.5, window=7, block=16, noise_sigma=.8, structure_gain=2.) -> None:
+        super().__init__()
+        self.p, self.window, self.block, self.noise_sigma = p, window, block, noise_sigma
+        self.structure_gain = structure_gain
+
+    def looks(self, values):
+        h, w = (s - s % self.block for s in values.shape)
+        if not h or not w:
+            return None
+        blocks = values[:h, :w].reshape(h // self.block, self.block, w // self.block, self.block)
+        blocks = blocks.permute(0, 2, 1, 3).reshape(-1, self.block * self.block)
+        mean, std = blocks.mean(dim=1), blocks.std(dim=1, unbiased=False)
+        good = (mean > 0) & (std > 0)
+        return float(((mean[good] / std[good]) ** 2).median()) if good.any() else None
+
+    def noise(self, height, width):
+        """Zero-mean, unit-variance Gaussian field with the configured spatial correlation."""
+        if self.noise_sigma <= 0:
+            return torch.randn(height, width)
+        radius = int(torch.ceil(torch.tensor(3 * self.noise_sigma)))
+        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
+        kernel = torch.exp(-x ** 2 / (2 * self.noise_sigma ** 2))
+        kernel /= kernel.sum()
+        field = torch.randn(1, 1, height + 2 * radius, width + 2 * radius)
+        field = NF.conv2d(field, kernel.view(1, 1, -1, 1))
+        field = NF.conv2d(field, kernel.view(1, 1, 1, -1))
+        return field[0, 0] / kernel.square().sum()
+
+    def resample(self, values):
+        """New values for a float H x W image in 0..255; None when the looks cannot be measured."""
+        looks = self.looks(values)
+        if looks is None:
+            return None
+        batch = values[None, None]
+        pad = self.window // 2
+        mean = NF.avg_pool2d(batch, self.window, stride=1, padding=pad, count_include_pad=False)[0, 0]
+        power = NF.avg_pool2d(batch ** 2, self.window, stride=1, padding=pad, count_include_pad=False)[0, 0]
+        variation = (power - mean ** 2).clamp_min(0) / mean.square().clamp_min(1e-6)
+        speckle = 1 / looks
+        weight = (self.structure_gain * (1 - speckle / variation.clamp_min(1e-12)) / (1 + speckle)).clamp(0, 1)
+        structure = mean + weight * (values - mean)
+        sigma = torch.log(torch.tensor(1 + speckle))
+        field = torch.exp(sigma.sqrt() * self.noise(*values.shape) - sigma / 2)
+        return (structure * (1 + (1 - weight) * (field - 1))).clamp(0, 255)
+
+    def forward(self, *inputs: Any) -> Any:
+        sample = inputs if len(inputs) > 1 else inputs[0]
+        if float(torch.rand(1)) >= self.p:
+            return sample
+        image, *rest = sample
+        stored = F.pil_to_tensor(image)
+        values = self.resample(stored[0].float())
+        if values is None:
+            return sample
+        result = values.round().to(torch.uint8)[None].expand_as(stored)
+        return (F.to_pil_image(result, mode=image.mode), *rest)
 
 
 @register()
