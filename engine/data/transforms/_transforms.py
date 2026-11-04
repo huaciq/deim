@@ -119,11 +119,14 @@ class SpeckleResample(T.Transform):
     s is a Gaussian field blurred to the speckle correlation of the stored images (noise_sigma,
     tools/check_speckle_resampling.py), mapped through the Nakagami quantiles. The plain Lee
     weight pulls a small bright target towards m; structure_gain scales it so such pixels stay intact.
+    The inside of a saturated scatterer has little variance and would be read as clutter, leaving
+    a hollow ring, so k also ramps to 1 as m goes from bright_ratio to 2 * bright_ratio times the
+    median local mean of the image: such returns are not fully developed speckle.
     """
-    def __init__(self, p=.5, window=7, block=16, noise_sigma=.8, structure_gain=2.) -> None:
+    def __init__(self, p=.5, window=7, block=16, noise_sigma=.8, structure_gain=2., bright_ratio=3.) -> None:
         super().__init__()
         self.p, self.window, self.block, self.noise_sigma = p, window, block, noise_sigma
-        self.structure_gain = structure_gain
+        self.structure_gain, self.bright_ratio = structure_gain, bright_ratio
 
     def looks(self, values):
         h, w = (s - s % self.block for s in values.shape)
@@ -178,6 +181,8 @@ class SpeckleResample(T.Transform):
         variation = (power - mean ** 2).clamp_min(0) / mean.square().clamp_min(1e-6)
         speckle = 1 / looks
         weight = (self.structure_gain * (1 - speckle / variation.clamp_min(1e-12)) / (1 + speckle)).clamp(0, 1)
+        clutter = mean[mean > 0].median() if (mean > 0).any() else torch.tensor(1.)
+        weight = weight.maximum((mean / (self.bright_ratio * clutter) - 1).clamp(0, 1))
         structure = mean + weight * (values - mean)
         field = self.speckle_field(looks, *values.shape)
         return (structure * (1 + (1 - weight) * (field - 1))).clamp(0, 255)

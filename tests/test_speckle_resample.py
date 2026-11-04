@@ -49,6 +49,12 @@ class SpeckleResampleTests(unittest.TestCase):
         self.assertEqual(float(self.new[:, -30:].max()), 0.)
         self.assertGreater(self.new[100:104, 100:104].mean(), 200.)
 
+    def test_saturated_scatterer_stays_solid(self):
+        values = scene()
+        values[150:170, 40:60] = 255  # flat inside: low local variance, must not become a hollow ring
+        new = self.op.resample(torch.from_numpy(values)).numpy()
+        self.assertGreater(new[155:165, 45:55].min(), 250.)
+
     def test_noise_correlation_follows_sigma_with_unit_variance(self):
         for sigma, low, high in ((0., -.05, .05), (.8, .4, .85)):
             field = SpeckleResample(noise_sigma=sigma).noise(400, 400)
