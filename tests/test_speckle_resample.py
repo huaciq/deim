@@ -50,7 +50,7 @@ class SpeckleResampleTests(unittest.TestCase):
         self.assertGreater(self.new[100:104, 100:104].mean(), 200.)
 
     def test_saturated_scatterer_stays_solid(self):
-        values = scene()
+        values = scene(level=20.)  # the clutter level of the stored images (median about 16-23)
         values[150:170, 40:60] = 255  # flat inside: low local variance, must not become a hollow ring
         new = self.op.resample(torch.from_numpy(values)).numpy()
         self.assertGreater(new[155:165, 45:55].min(), 250.)

@@ -90,6 +90,29 @@
 - 背景误检与记忆无关：见过子集去掉后也从 95.73 升到 98.21。
 - 局限：匹配器可能把弱目标、被切片截断的目标也归入"没见过"，子集不一定全是真正没见过的飞机；漏检原因要看第二步诊断。单种子。这些结果来自 test，只用于判断机制方向，不用于调参或选配方。
 
+## 1.3 斑点重采样 A（方法，不是协议的一部分）
+
+`SpeckleResample`（`engine/data/transforms/_transforms.py`）在翻转之后、补边之前作用于存储的像素，概率 0.5，第 4–119 轮生效，最后 12 轮看原图。
+配置 `deim_hgnetv2_m_sar_aircraft_b_canvas1024_speckle_132e_b12_{old,new}_server.yml` 相对 B-v1 只多这一项。
+
+- **模型**：存储值的分位数符合幅度域 Nakagami，不符合对数正态（下表），等效单视数约 1.3。按每张图实测的 (均值/标准差)² 取形状参数，空间相关由高斯模糊控制。
+- **结构保留**：Lee 权重保留强散射、替换均匀杂波。标准权重把小而亮的目标压低约 25%，所以乘以 structure_gain=2。
+  饱和亮块内部方差小，会被当成杂波而变成空心环（真实图拼图上发现，统计量看不出来），所以局部均值超过全图中位数 3–6 倍时逐渐完全保留（bright_ratio=3）。
+- **参数**：只用 trainval 的 150 张图（`tools/check_speckle_resampling.py`，新服务器 `diagnostics/speckle_check_bright_20261104_163103`），训练前定下，不看 test。
+
+| 版本 | 原图 ENL | 工作分辨率 ENL | lag1 | lag2 | q0.01 | q0.5 | q0.99 | 杂波残差相关 | 目标框残差相关 | 目标裁剪与原图 ≥0.9 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 原图 | 4.67 | 7.08 | 0.550 | 0.062 | 0.226 | 0.949 | 2.057 | — | — | — |
+| **gain 2、窗口 7、σ 0.8、bright 3（采用）** | 4.15 | 5.86 | 0.583 | 0.051 | 0.209 | 0.944 | 2.075 | 0.201 | 0.385 | 0.944 |
+
+未保留亮块的对照（`speckle_check_g*_20261104_160646`）：gain 1 杂波残差相关 0.096、目标框 0.205，但亮目标被压低；窗口 15 的 ENL 最接近（4.74 / 7.01），目标框残差相关却升到 0.606，单张耗时约 3 倍。
+
+局限：
+
+- 生成图的 ENL 比原图低 11–17%，噪声略强。单张约 0.28 秒（服务器负载下、最低优先级），按概率 0.5、每卡 4 个 worker 估算不应成为瓶颈，启动后看 `data:` 时间确认。
+- **A 只检验"模型记住斑点"这一种记忆。** 斑点层确实换掉了（杂波残差相关 0.201），但目标的强散射布局保留，94% 的目标裁剪与原图相关仍 ≥0.9。如果模型记住的是散射布局，A 不会有效，这是一个可以被证伪的结果。
+- 判定：没见过子集的定位率和 AP50 要上升；只是见过子集下降则不采用。单种子 AP50 增益 <1 不算有效。
+
 ## 2. 运行顺序
 
 基线命名为 DEIM-D-FINE-M（D-FINE 架构 + DEIM 的 MAL、MixUp 与 COCO 权重），不因后续结果更改。
@@ -247,6 +270,30 @@ cat "$DIAG/report/report.md"
 ```
 
 导出的 AP50 应与 §1.1 的 87.91 一致（只差 float32 与 float16 的舍入）。
+
+漏检原因（`tools/diagnose_missed_targets.py`，只用 CPU，复用同一份预测；回答漏检是没有候选、框不准还是分数低，并按匹配分、切片边缘、对比度、尺寸、场景拆分，生成裁剪拼图）：
+
+```bash
+export DIAG=$(ls -dt /home/zxy/sar/experiments/diagnostics/errors_bv1_* | head -n 1); echo "$DIAG"
+CUDA_VISIBLE_DEVICES= nice -n 19 python tools/diagnose_missed_targets.py \
+  --predictions "$DIAG/predictions.json.gz" --data-root "$DATA" --output "$DIAG/missed"
+cat "$DIAG/missed/report.md"
+tar -czf "$DIAG/missed.tar.gz" -C "$DIAG" missed
+ls -lh "$DIAG/missed.tar.gz"
+```
+
+## 3.3 B-v1 + 斑点重采样
+
+新服务器把命令里的配置换成 `..._speckle_132e_b12_new_server.yml`，路径按 §3.1。其余与 §3 的启动、监控、恢复和 test 评估相同，`OUT` 匹配 `*_b_canvas1024_speckle_132e_b12_*`。
+
+```bash
+nvidia-smi -i 0,1
+export EXPERIMENT_ROOT=/home/zxy/sar/experiments
+export INITIAL_WEIGHTS=/home/zxy/sar/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e_airplane7.pth
+bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sar_aircraft_b_canvas1024_speckle_132e_b12_old_server.yml
+```
+
+启动日志应出现 `### Transform @SpeckleResample ###`，`Policy_ops` 中有 `SpeckleResample`。第 4 轮起看 `data:` 是否明显变长。
 
 ## 4. 本地验证
 

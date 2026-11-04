@@ -58,6 +58,21 @@ class ProtocolBTests(unittest.TestCase):
             old[loader]['dataset'].pop('ann_file')
         self.assertEqual(new, old)
 
+    def test_speckle_adds_only_speckle(self):
+        skip = ('__include__', 'output_dir')
+        base = {k: v for k, v in load_config(str(CONFIG), {}).items() if k not in skip}
+        speckle = load_config(str(CONFIG.with_name(CONFIG.name.replace('_132e', '_speckle_132e'))), {})
+        speckle = {k: v for k, v in speckle.items() if k not in skip}
+        transforms = speckle['train_dataloader']['dataset']['transforms']
+        op = transforms['ops'].pop(1)
+        self.assertEqual(op, dict(type='SpeckleResample', p=.5, window=7, noise_sigma=.8, structure_gain=2., bright_ratio=3.))
+        self.assertEqual(transforms['policy']['ops'].pop(), 'SpeckleResample')
+        self.assertEqual(speckle, base)
+        new = load_config(str(CONFIG.with_name(CONFIG.name.replace('_132e', '_speckle_132e').replace('old_server', 'new_server'))), {})
+        self.assertTrue(new['train_dataloader']['dataset']['ann_file'].startswith('/root/zxy/datasets/'))
+        self.assertTrue(new['val_dataloader']['dataset']['ann_file'].startswith('/root/zxy/datasets/'))
+        self.assertEqual(new['train_dataloader']['dataset']['transforms']['ops'][1]['type'], 'SpeckleResample')
+
     def test_canvas_gives_every_image_the_same_scale(self):
         for side in (800, 1500):
             image = PIL.Image.new('RGB', (side, side), 30)
