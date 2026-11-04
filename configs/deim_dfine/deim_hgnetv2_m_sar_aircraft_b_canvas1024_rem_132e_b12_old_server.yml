@@ -1,0 +1,7 @@
+# Scheme B main protocol B-v1 + stride-8 REM; differs from the B-v1 baseline only by REM.
+__include__: ['./deim_hgnetv2_m_sar_aircraft_b_canvas1024_132e_b12_old_server.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sar_aircraft_b_canvas1024_rem_132e_b12/seed0
+
+HybridEncoder:
+  use_rem: True

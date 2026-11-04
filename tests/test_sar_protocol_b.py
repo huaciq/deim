@@ -36,6 +36,15 @@ class ProtocolBTests(unittest.TestCase):
         self.assertEqual(cfg['epoches'] - cfg['no_aug_epoch'], train['collate_fn']['stop_epoch'])
         self.assertEqual(train['total_batch_size'], 12)
 
+    def test_rem_adds_only_rem(self):
+        skip = ('__include__', 'output_dir')
+        base = {k: v for k, v in load_config(str(CONFIG), {}).items() if k not in skip}
+        rem = load_config(str(CONFIG.with_name(CONFIG.name.replace('_132e', '_rem_132e'))), {})
+        rem = {k: v for k, v in rem.items() if k not in skip}
+        self.assertTrue(rem['HybridEncoder'].pop('use_rem'))
+        base['HybridEncoder'].pop('use_rem', None)
+        self.assertEqual(rem, base)
+
     def test_canvas_gives_every_image_the_same_scale(self):
         for side in (800, 1500):
             image = PIL.Image.new('RGB', (side, side), 30)
