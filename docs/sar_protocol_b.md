@@ -354,6 +354,8 @@ B-v1 基线在旧服务器上运行，比较时注意两台机器的软件版本
 
 运行：`/root/zxy/experiments/deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_b_canvas1024_rem_132e_b12_new_server_seed0_20261104_102922_JpWE66`（revision `aef3c03`，GPU 0、1）。
 
+B-v1 基线的新服务器配置为 `deim_hgnetv2_m_sar_aircraft_b_canvas1024_132e_b12_new_server.yml`，只改路径，同为 seed 0，用于检验 REM、A 与 B-v1 的跨服务器比较是否可靠（§1.7）。
+
 ## 3.2 错误拆解（B-v1 与之后的每个方法）
 
 `tools/diagnose_detection_errors.py` 只用 CPU，读 `tools/export_analysis_predictions.py` 导出的 test 预测，回答：
