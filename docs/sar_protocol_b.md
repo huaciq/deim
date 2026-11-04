@@ -101,7 +101,7 @@
 - **按架次是全有或全无**：test 共 381 架不同的飞机，没见过的 82 架。≥3 个切片的 61 架里，GT 数上"全部检出 224、全部漏检 233、部分检出 176"。部分检出的架次中，检到和没检到的切片在位置、边缘、对比度上没有明显差别。
 - **有效样本极少**：没见过的 ARJ21 只有 10 架、787 只有 14 架。一架 19 个切片的 ARJ21 全部漏检，就占该类 GT 的 5%。追上 SAR-Net 需要的 2.29，粗算相当于多检出三四架飞机，所以单种子差值的波动可能很大。
 - **朝向有关联但不决定**：按同类 trainval 中相近朝向的比例分三档，没见过目标的定位率 0.40 / 0.47 / 0.68（主轴）、0.38 / 0.43 / 0.62（对称轴）。分类别不一致：other 0.19→0.69，ARJ21 0.11→0.26，737 和 787 没有这个趋势或相反。切片不独立，这只是相关。
-- **背景误检可能有一部分是漏标**：264 个（score≥0.3），other 占 158。最高分的误检拼图里，同一个目标在多个切片重复出现，外观像飞机，只经目视、未核实。去掉背景误检的 +2.78 因此不能全当作可达到的空间。官方标注不改，只在分析中说明。
+- **背景误检有一部分像漏标**：264 个（score≥0.3），other 占 158。用户目视最高分的 32 个框（2026-11-04）：A220 一组 4 个最像漏标飞机，能辨出机身、机头、两翼和尾部；亮团一组 4 个较像；暗目标一组 9 个有嫌疑；其余存疑或是多目标大框。这些框是少数物体的重复切片，不是独立飞机。去掉背景误检的 +2.78 因此不能全当作可达到的空间。官方标注不改，只在分析中说明。
 
 ## 1.3 斑点重采样 A（方法，不是协议的一部分）
 
@@ -341,6 +341,33 @@ cat "$DIAG/missed/report.md"
 tar -czf "$DIAG/missed.tar.gz" -C "$DIAG" missed
 ls -lh "$DIAG/missed.tar.gz"
 ```
+
+分数证据与误检分组（`tools/diagnose_score_evidence.py`，不训练）：判断"定位确定性重打分"和"强散射硬负样本"两个候选组件是否值得实现。
+导出最后一层全部查询的分数和 FDR 边框分布统计（单进程，几分钟；没有空闲显存时用 `--device cpu`），再用 CPU 分析：
+
+```bash
+export RUN=/home/zxy/sar/experiments/deim_m_sar_aircraft_deim_hgnetv2_m_sar_aircraft_b_canvas1024_132e_b12_old_server_seed0_20261103_193451_xwONF9
+export DIAG=$(ls -dt /home/zxy/sar/experiments/diagnostics/errors_bv1_* | head -n 1); echo "$DIAG"
+nvidia-smi -i 0,1
+CUDA_VISIBLE_DEVICES=0 PYTHONUNBUFFERED=1 nohup python tools/diagnose_score_evidence.py export \
+  -c "$RUN/resolved_config.yml" -r "$RUN/final.pth" --ann-file "$DATA/COCO/test.json" \
+  --output "$DIAG/query_evidence.npz" > "$DIAG/evidence_export.console.log" 2>&1 < /dev/null &
+PID=$!; printf '%s\n' "$PID" > "$DIAG/evidence_export.pid"; disown "$PID"
+tail -f "$DIAG/evidence_export.console.log"
+```
+
+导出结束后：
+
+```bash
+CUDA_VISIBLE_DEVICES= nice -n 19 python tools/diagnose_score_evidence.py analyze \
+  --evidence "$DIAG/query_evidence.npz" --data-root "$DATA" --output "$DIAG/evidence"
+cat "$DIAG/evidence/report.md"
+tar -czf "$DIAG/evidence.tar.gz" -C "$DIAG" evidence
+ls -lh "$DIAG/evidence.tar.gz"
+```
+
+组件 1 继续的条件：低分的没见过目标对背景和对重复框都明显可分，且 AP50 上限至少高 1。AP50 上限是在 test 上算的，只用于诊断，不得据此设定参数。
+拼图 `false_positive_groups.png` 给每个物体编号；把判断为漏标飞机的编号传给 `--unlabelled 1 2 ...`（换新的 `--output`），可得移除这些框后的 AP50。
 
 ## 3.3 B-v1 + 斑点重采样
 
