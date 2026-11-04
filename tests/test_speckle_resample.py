@@ -56,6 +56,13 @@ class SpeckleResampleTests(unittest.TestCase):
             lag = float(torch.corrcoef(torch.stack([field[:, :-1].ravel(), field[:, 1:].ravel()]))[0, 1])
             self.assertTrue(low < lag < high, (sigma, lag))
 
+    def test_nakagami_field_reproduces_the_measured_looks(self):
+        self.assertAlmostEqual(SpeckleResample.nakagami_shape(3.66), 1., delta=.03)  # Rayleigh amplitude
+        for looks in (2.5, 4.6, 7., 20.):
+            field = SpeckleResample(noise_sigma=.8).speckle_field(looks, 500, 500)
+            self.assertAlmostEqual(float(field.mean()), 1., delta=.03)
+            self.assertAlmostEqual(float((field.mean() / field.std()) ** 2), looks, delta=looks * .15)
+
     def test_pil_sample_keeps_mode_size_and_target(self):
         for mode in ('L', 'RGB'):
             image = PIL.Image.fromarray(self.values.astype(np.uint8)).convert(mode)

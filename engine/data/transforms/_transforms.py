@@ -112,13 +112,13 @@ class SpeckleResample(T.Transform):
     """Draw a new speckle realization for a stored SAR image; boxes and structure are unchanged.
 
     Overlapping tiles repeat a target with identical speckle, which a detector can memorize.
-    Works on the stored values because their domain (amplitude, stretch) is not documented:
-    the looks L of the image are its median (block mean / block std)^2, the same statistic as
-    the measured ENL. A Lee weight k keeps strong scatterers and resamples homogeneous clutter:
-    new = R * (1 + (1 - k) * (s - 1)), R = m + k * (value - m), with m the local mean and s a
-    lognormal field of mean 1 and variance 1/L, blurred to match the speckle correlation of
-    the stored images (noise_sigma, tools/check_speckle_resampling.py). The plain Lee weight
-    pulls a small bright target towards m; structure_gain scales it so such pixels stay intact.
+    The stored values behave like amplitude, so the speckle is a Nakagami field s of mean 1
+    whose shape reproduces the image's median (block mean / block std)^2, the measured ENL.
+    A Lee weight k keeps strong scatterers and resamples homogeneous clutter:
+    new = R * (1 + (1 - k) * (s - 1)), R = m + k * (value - m), with m the local mean.
+    s is a Gaussian field blurred to the speckle correlation of the stored images (noise_sigma,
+    tools/check_speckle_resampling.py), mapped through the Nakagami quantiles. The plain Lee
+    weight pulls a small bright target towards m; structure_gain scales it so such pixels stay intact.
     """
     def __init__(self, p=.5, window=7, block=16, noise_sigma=.8, structure_gain=2.) -> None:
         super().__init__()
@@ -148,6 +148,24 @@ class SpeckleResample(T.Transform):
         field = NF.conv2d(field, kernel.view(1, 1, 1, -1))
         return field[0, 0] / kernel.square().sum()
 
+    @staticmethod
+    def nakagami_shape(looks):
+        """Shape m with (mean / std)^2 = looks; 3.66 is m = 1 (single-look Rayleigh amplitude)."""
+        shapes = torch.logspace(-.3, 2.5, 512, dtype=torch.float64)
+        ratio = torch.exp(2 * (torch.lgamma(shapes + .5) - torch.lgamma(shapes))) / shapes
+        ratios = ratio / (1 - ratio)
+        index = torch.searchsorted(ratios, torch.tensor(looks, dtype=torch.float64)).clamp_max(len(shapes) - 1)
+        return float(shapes[index])
+
+    def speckle_field(self, looks, height, width, table_size=4096):
+        """Spatially correlated Nakagami field of mean 1, from the quantiles of a sampled table."""
+        shape = self.nakagami_shape(looks)
+        table = torch.distributions.Gamma(shape, shape).sample((table_size,)).sqrt().sort().values
+        table /= table.mean()
+        position = torch.special.ndtr(self.noise(height, width)) * (table_size - 1)
+        lower = position.long().clamp_max(table_size - 2)
+        return torch.lerp(table[lower], table[lower + 1], position - lower)
+
     def resample(self, values):
         """New values for a float H x W image in 0..255; None when the looks cannot be measured."""
         looks = self.looks(values)
@@ -161,8 +179,7 @@ class SpeckleResample(T.Transform):
         speckle = 1 / looks
         weight = (self.structure_gain * (1 - speckle / variation.clamp_min(1e-12)) / (1 + speckle)).clamp(0, 1)
         structure = mean + weight * (values - mean)
-        sigma = torch.log(torch.tensor(1 + speckle))
-        field = torch.exp(sigma.sqrt() * self.noise(*values.shape) - sigma / 2)
+        field = self.speckle_field(looks, *values.shape)
         return (structure * (1 + (1 - weight) * (field - 1))).clamp(0, 255)
 
     def forward(self, *inputs: Any) -> Any:
