@@ -2,7 +2,7 @@
 # Explicit, one-time launch. It never queues, waits for GPUs, or stops jobs.
 # Usage: bash tools/run_sar_module_experiment.sh CONFIG
 #        bash tools/run_sar_module_experiment.sh --resume RUN
-# Optional new-run paths: EXPERIMENT_ROOT and INITIAL_WEIGHTS.
+# Optional new-run settings: EXPERIMENT_ROOT, INITIAL_WEIGHTS and RUN_PREFIX.
 set -e
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
@@ -18,7 +18,7 @@ if [ "$#" -eq 1 ] && [ "$1" != "--resume" ]; then
     mkdir -p "$EXPERIMENT_ROOT"
     NAME=$(basename "$CONFIG")
     NAME=${NAME%.*}
-    OUT=$(mktemp -d "$EXPERIMENT_ROOT/deim_m_sar_aircraft_${NAME}_seed0_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)_XXXXXX")
+    OUT=$(mktemp -d "$EXPERIMENT_ROOT/${RUN_PREFIX:-deim_m_sar_aircraft}_${NAME}_seed0_$(TZ=Asia/Shanghai date +%Y%m%d_%H%M%S)_XXXXXX")
     ATTEMPT=new
     LOG="$OUT/console.log"
     GATE="$OUT/gpu_gate.json"
@@ -63,7 +63,8 @@ if mode == 'new':
     protocol = cfg.get('experiment_protocol_document', 'docs/sar_structure_frequency_experiments.md')
     (run / 'method_and_protocol.md').write_text(Path(protocol).read_text(encoding='utf-8'), encoding='utf-8')
     stats = Path(cfg['train_dataloader']['dataset']['ann_file']).with_name('stats.json')
-    (run / 'dataset_stats.json').write_text(stats.read_text(), encoding='utf-8')
+    if stats.is_file():
+        (run / 'dataset_stats.json').write_text(stats.read_text(), encoding='utf-8')
 elif not Path(os.environ['INITIAL']).is_file():
     raise FileNotFoundError('Resume requires the stopped run\'s last.pth: ' + os.environ['INITIAL'])
 
@@ -108,7 +109,7 @@ modules = {
 }
 metadata = dict(
     mode=mode, source_config=str(source), output_dir=str(run),
-    current_git_revision=revision, baseline_revision='a448005', modules=modules,
+    current_git_revision=revision, baseline_revision=cfg.get('experiment_baseline_revision', 'a448005'), modules=modules,
     seed=cfg.get('seed', 0), devices=[0, 1], world_size=2,
     global_batch=train['total_batch_size'], batch_per_gpu=train['total_batch_size'] // 2,
     epochs=cfg['epoches'], evaluation=dict(split='val', spatial_size=cfg['eval_spatial_size'],

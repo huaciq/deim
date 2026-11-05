@@ -1,0 +1,50 @@
+# SARDet-100K P4: official DEIM-D-FINE-M schedule on the full official splits.
+# See docs/sardet100k_m_protocol.md. Paths are for the new server.
+__include__: ['./deim_hgnetv2_m_coco.yml']
+
+experiment_protocol_document: docs/sardet100k_m_protocol.md
+experiment_baseline_revision: null
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_102e_b32_nozoom_nocrop/seed0
+seed: 0
+num_classes: 6
+remap_mscoco_category: False
+
+# The full detector is initialized with train.py -t <COCO checkpoint>.
+HGNetv2:
+  pretrained: False
+
+# Inherited from the official M config: 102 epochs, flat 49, no_aug 12,
+# LR 4e-4, backbone LR 4e-5, warmup 2000 iterations, EMA 0.9999.
+use_ema: True
+use_amp: True
+amp_dtype: float16
+amp_loss_fp32: True
+amp_fp32_retry: True
+scaler:
+  enabled: True
+
+train_dataloader:
+  total_batch_size: 32  # GLOBAL: 16 per GPU on GPUs 0 and 1.
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/train
+    ann_file: /root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/train.json
+    transforms:
+      # The official augmentation list minus RandomZoomOut/RandomIoUCrop.
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5], probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [640, 640]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        ops: ['Mosaic', 'RandomPhotometricDistort']
+
+val_dataloader:
+  total_batch_size: 64
+  dataset:
+    img_folder: /root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/val
+    ann_file: /root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/val.json

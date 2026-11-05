@@ -1,0 +1,18 @@
+# SARDet-100K P0: the 102-epoch recipe with only the schedule shortened to 36 epochs.
+# Boundaries follow the official rule: 32 main + 4 no-aug, flat = 4 + 32 // 2 = 20.
+__include__: ['./deim_hgnetv2_m_sardet100k_102e_b32_nozoom_nocrop.yml']
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_36e_b32_nozoom_nocrop/seed0
+
+epoches: 36
+flat_epoch: 20
+no_aug_epoch: 4
+
+train_dataloader:
+  dataset:
+    transforms:
+      policy:
+        epoch: [4, 20, 32]
+  collate_fn:
+    mixup_epochs: [4, 20]
+    stop_epoch: 32
