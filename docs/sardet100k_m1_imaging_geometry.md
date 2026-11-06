@@ -1,5 +1,7 @@
 # M1：成像—标注几何解耦（SARDet-100K）
 
+> 2026-11-06：用户决定 M1 不作为研究方法，因为它修正的是数据集标注，所有方法都面临同样的问题。这里只保留记录，主线见 [GREA 设计](sardet100k_grea_design.md)。
+
 代码：`engine/deim/imaging_geometry.py`，配置：`configs/deim_dfine/deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32.yml`。
 证据和其他候选见[基线诊断](sardet100k_baseline_diagnosis.md)，结果记入[实验总表](sardet100k_results_ledger.md)。
 
