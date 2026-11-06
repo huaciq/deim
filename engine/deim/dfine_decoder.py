@@ -33,6 +33,7 @@ from .orthogonal_topology_attention import OrthogonalTopologyDeformAttn
 from .symmetric_topology_attention import SymmetricOrthogonalTopologyDeformAttn
 from .imaging_geometry import ImagingGeometryHead
 from .guard_ring_evidence import GuardRingEvidence, LocalEvidencePyramid
+from .fine_level import FineLevelNeck
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -61,8 +62,11 @@ class MSDeformableAttention(nn.Module):
         num_points=4,
         method='default',
         offset_scale=0.5,
+        fine_points=0,
     ):
         """Multi-Scale Deformable Attention
+
+        fine_points adds one more level through separate layers, so the original layers keep their shape and COCO weights.
         """
         super(MSDeformableAttention, self).__init__()
         self.embed_dim = embed_dim
@@ -93,6 +97,23 @@ class MSDeformableAttention(nn.Module):
         self.ms_deformable_attn_core = functools.partial(deformable_attention_core_func_v2, method=self.method)
 
         self._reset_parameters()
+
+        self.fine_points = fine_points
+        if fine_points:
+            if method != 'default':
+                raise ValueError('The fine level requires differentiable bilinear cross attention.')
+            with torch.random.fork_rng(devices=[]):
+                self.fine_offsets = nn.Linear(embed_dim, num_heads * fine_points * 2)
+                self.fine_weights = nn.Linear(embed_dim, num_heads * fine_points)
+            init.constant_(self.fine_offsets.weight, 0)
+            thetas = torch.arange(num_heads, dtype=torch.float32) * (2.0 * math.pi / num_heads)
+            directions = torch.stack([thetas.cos(), thetas.sin()], -1)
+            directions = directions / directions.abs().max(-1, keepdim=True).values
+            scaling = torch.arange(1, fine_points + 1, dtype=torch.float32).reshape(1, -1, 1)
+            self.fine_offsets.bias.data[...] = (directions.reshape(num_heads, 1, 2).tile([1, fine_points, 1]) * scaling).flatten()
+            init.constant_(self.fine_weights.weight, 0)
+            init.constant_(self.fine_weights.bias, 0)
+            self.register_buffer('fine_points_scale', torch.full((fine_points,), 1 / fine_points))
 
         if method == 'discrete':
             for p in self.sampling_offsets.parameters():
@@ -136,6 +157,13 @@ class MSDeformableAttention(nn.Module):
         sampling_offsets = sampling_offsets.reshape(bs, Len_q, self.num_heads, sum(self.num_points_list), 2)
 
         attention_weights = self.attention_weights(query).reshape(bs, Len_q, self.num_heads, sum(self.num_points_list))
+        num_points_list = self.num_points_list
+        points_scale = self.num_points_scale
+        if self.fine_points:
+            sampling_offsets = torch.cat([sampling_offsets, self.fine_offsets(query).reshape(bs, Len_q, self.num_heads, self.fine_points, 2)], 3)
+            attention_weights = torch.cat([attention_weights, self.fine_weights(query).reshape(bs, Len_q, self.num_heads, self.fine_points)], 3)
+            num_points_list = [*num_points_list, self.fine_points]
+            points_scale = torch.cat([points_scale, self.fine_points_scale])
         attention_weights = F.softmax(attention_weights, dim=-1)
 
         if reference_points.shape[-1] == 2:
@@ -145,7 +173,7 @@ class MSDeformableAttention(nn.Module):
         elif reference_points.shape[-1] == 4:
             # reference_points [8, 480, None, 1,  4]
             # sampling_offsets [8, 480, 8,    12, 2]
-            num_points_scale = self.num_points_scale.to(dtype=query.dtype).unsqueeze(-1)
+            num_points_scale = points_scale.to(dtype=query.dtype).unsqueeze(-1)
             offset = sampling_offsets * num_points_scale * reference_points[:, :, None, :, 2:] * self.offset_scale
             sampling_locations = reference_points[:, :, None, :, :2] + offset
         else:
@@ -153,7 +181,7 @@ class MSDeformableAttention(nn.Module):
                 "Last dim of reference_points must be 2 or 4, but get {} instead.".
                 format(reference_points.shape[-1]))
 
-        output = self.ms_deformable_attn_core(value, value_spatial_shapes, sampling_locations, attention_weights, self.num_points_list)
+        output = self.ms_deformable_attn_core(value, value_spatial_shapes, sampling_locations, attention_weights, num_points_list)
 
         return output
 
@@ -170,7 +198,8 @@ class TransformerDecoderLayer(nn.Module):
                  cross_attn_method='default',
                  layer_scale=None,
                  use_ost_da=False,
-                 ost_da_version='v1'):
+                 ost_da_version='v1',
+                 fine_points=0):
         super(TransformerDecoderLayer, self).__init__()
         if use_ost_da and cross_attn_method != 'default':
             raise ValueError('OST-DA requires differentiable bilinear cross attention (cross_attn_method: default).')
@@ -187,7 +216,7 @@ class TransformerDecoderLayer(nn.Module):
 
         # cross attention
         self.cross_attn = MSDeformableAttention(d_model, n_head, n_levels, n_points, \
-                                                method=cross_attn_method)
+                                                method=cross_attn_method, fine_points=fine_points)
         self.dropout2 = nn.Dropout(dropout)
 
         # gate
@@ -813,6 +842,10 @@ class DFINETransformer(nn.Module):
                  grea_points=8,
                  grea_num_layers=2,
                  grea_ring=[1.25, 2.],
+                 use_fine_level=False,
+                 fine_s2_channels=96,
+                 fine_dim=128,
+                 fine_points=3,
                  ):
         super().__init__()
         if use_mdcc and (use_sdcp or use_bccq or use_slqc or query_select_method == 'agnostic'):
@@ -831,6 +864,18 @@ class DFINETransformer(nn.Module):
 
         for _ in range(num_levels - len(feat_strides)):
             feat_strides.append(feat_strides[-1] * 2)
+
+        decoder_levels = num_levels
+        layer_fine_points = 0
+        if use_fine_level:
+            if list(feat_strides) != [8, 16, 32] or num_levels != 3 or layer_scale != 1:
+                raise ValueError('The fine level requires strides [8, 16, 32] and layer_scale=1.')
+            if cross_attn_method != 'default' or any((use_ost_da, use_grea, use_bccq, use_sdcp, use_imaging_geometry)):
+                raise ValueError('The fine level cannot be combined with OST-DA, GREA, BCCQ, SDCP or imaging geometry.')
+            # Appended last, so the indices of the original levels and their weights do not change.
+            feat_strides = [*feat_strides, 4]
+            num_levels = 4
+            layer_fine_points = fine_points
 
         self.hidden_dim = hidden_dim
         scaled_dim = round(layer_scale*hidden_dim)
@@ -859,11 +904,11 @@ class DFINETransformer(nn.Module):
         self.up = nn.Parameter(torch.tensor([0.5]), requires_grad=False)
         self.reg_scale = nn.Parameter(torch.tensor([reg_scale]), requires_grad=False)
         decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, \
-            activation, num_levels, num_points, cross_attn_method=cross_attn_method,
-            use_ost_da=use_ost_da, ost_da_version=ost_da_version)
+            activation, decoder_levels, num_points, cross_attn_method=cross_attn_method,
+            use_ost_da=use_ost_da, ost_da_version=ost_da_version, fine_points=layer_fine_points)
         decoder_layer_wide = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, \
-            activation, num_levels, num_points, cross_attn_method=cross_attn_method,
-            layer_scale=layer_scale, use_ost_da=use_ost_da, ost_da_version=ost_da_version)
+            activation, decoder_levels, num_points, cross_attn_method=cross_attn_method,
+            layer_scale=layer_scale, use_ost_da=use_ost_da, ost_da_version=ost_da_version, fine_points=layer_fine_points)
         self.decoder = TransformerDecoder(hidden_dim, decoder_layer, decoder_layer_wide, num_layers, nhead,
                                           reg_max, self.reg_scale, self.up, eval_idx, layer_scale, act=activation)
       # denoising
@@ -1077,6 +1122,11 @@ class DFINETransformer(nn.Module):
                 self.grea_evidence_head = nn.Linear(grea_dim, num_classes)
                 init.constant_(self.grea_evidence_head.bias, bias_init_with_prob(0.01))
 
+        self.fine_neck = None
+        if use_fine_level:
+            with torch.random.fork_rng(devices=[]):
+                self.fine_neck = FineLevelNeck(fine_s2_channels, hidden_dim, fine_dim)
+
     def convert_to_deploy(self):
         self.scs_head = None
         self.use_scs = False
@@ -1179,7 +1229,8 @@ class DFINETransformer(nn.Module):
             grid_y, grid_x = torch.meshgrid(torch.arange(h), torch.arange(w), indexing='ij')
             grid_xy = torch.stack([grid_x, grid_y], dim=-1)
             grid_xy = (grid_xy.unsqueeze(0) + 0.5) / torch.tensor([w, h], dtype=dtype)
-            wh = torch.ones_like(grid_xy) * grid_size * (2.0 ** lvl)
+            # Same as 2 ** lvl for the original doubling strides; the appended stride-4 level gets half of the first.
+            wh = torch.ones_like(grid_xy) * grid_size * (self.feat_strides[lvl] / self.feat_strides[0])
             lvl_anchors = torch.concat([grid_xy, wh], dim=-1).reshape(-1, h * w, 4)
             anchors.append(lvl_anchors)
 
@@ -1266,6 +1317,8 @@ class DFINETransformer(nn.Module):
 
     def forward(self, feats, targets=None, image_size=None, images=None, local_features=None):
         # input projection and embedding
+        if self.fine_neck is not None:
+            feats = [*feats, self.fine_neck(local_features[0], feats[0])]
         memory, spatial_shapes = self._get_encoder_input(feats)
         if self.use_sdcp:
             if image_size is None:

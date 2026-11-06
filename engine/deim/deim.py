@@ -28,7 +28,7 @@ class DEIM(nn.Module):
         images = x
         x = self.backbone(x)
         local_features = None
-        if getattr(self.decoder, 'grea_pyramid', None) is not None:
+        if getattr(self.decoder, 'grea_pyramid', None) is not None or getattr(self.decoder, 'fine_neck', None) is not None:
             # Backbone returns S2, S3, S4, S5. The encoder keeps its usual three stages.
             local_features = x[:2]
             x = x[1:]

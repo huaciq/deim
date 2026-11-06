@@ -1,0 +1,17 @@
+# Stride-4 level on the fixed 36-epoch E000 protocol. Only the module differs.
+# See docs/sardet100k_fine_level_design.md.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_fine_level_design.md
+experiment_baseline_revision: 455b196
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_fine_level_36e_b32/seed0
+
+HGNetv2:
+  return_idx: [0, 1, 2, 3]
+
+DFINETransformer:
+  use_fine_level: True
+  fine_s2_channels: 96
+  fine_dim: 128
+  fine_points: 3

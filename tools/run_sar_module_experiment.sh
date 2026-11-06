@@ -74,6 +74,7 @@ criterion = cfg.get('DEIMCriterion', {})
 modules = {
     'imaging_geometry': bool(cfg.get('DFINETransformer', {}).get('use_imaging_geometry', False)),
     'grea': bool(cfg.get('DFINETransformer', {}).get('use_grea', False)),
+    'fine_level': bool(cfg.get('DFINETransformer', {}).get('use_fine_level', False)),
     'scs': bool(cfg.get('DFINETransformer', {}).get('use_scs', False)),
     'slqc': bool(cfg.get('DFINETransformer', {}).get('use_slqc', False)),
     'slqc_mode': cfg.get('DFINETransformer', {}).get('slqc_mode', 'layout'),
