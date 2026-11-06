@@ -163,4 +163,4 @@ cd /root/zxy/deim && bash tools/run_sar_module_experiment.sh --resume "$OUT"
 
 ## 结果
 
-待训练完成后填写。
+E001 已于 2026-11-06 在新服务器启动（revision `8e83207`，seed 0，GPU 0、1），运行目录 `/root/zxy/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32_seed0_20261106_145049_1Gh5VI`。结果待训练完成后填写。
