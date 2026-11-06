@@ -1,7 +1,9 @@
 # SARDet-100K 主基线：DEIM-D-FINE-M，P0（36 轮）与 P4（102 轮）
 
-用户决定只跑这两组，不做种子、输入尺寸和 ZoomOut/IoUCrop 的校准（2026-11-04）。
-尚无结果。论文对比行不引用文献数字，用同协议自跑。
+用户决定不做种子、输入尺寸和 ZoomOut/IoUCrop 的校准（2026-11-04）。
+
+**基线已定为 P0（2026-11-06）：** val AP 65.29，test AP 62.39，后续实验都用 36 轮。P4 未运行，配置保留。
+所有结果记在[实验总表](sardet100k_results_ledger.md)。论文主表用自跑结果，不和文献数字直接比较。
 
 ## 配置
 
@@ -26,12 +28,12 @@
 
 `total_batch_size` 已是全局值。显存按已有记录粗算峰值约 22 GB，未实测。
 
-## 决策规则（提议，待用户确认）
+## 决策规则
 
-- P4 与 P0 的 AP 差不超过 1：后续模块筛选和正式实验都用 36 轮。
-- 差超过 1：模块筛选仍用 36 轮，正式实验用 102 轮。
-- 没有 P1，单种子波动未测，因此模块筛选用固定门槛：36 轮单种子涨 0.5 AP 以上才晋级，
-  曲线结束时明显高于基线并仍在上升的补一次长日程。最终方法和基线再跑多种子。
+- 模块筛选和正式实验都用 36 轮。
+- 单种子波动未测，模块筛选暂用固定门槛：36 轮 val AP 涨 0.5 以上才晋级，
+  曲线结束时明显高于基线并仍在上升的补一次长日程。基线有第二个种子后按波动调整门槛。
+- test 只评估最终方法和基线。最终方法和基线都跑多种子。
 
 ## 启动前
 
@@ -45,15 +47,13 @@ source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate deim_zxy
 ```
 
-确认标注目录里有没有 test 标注。官方 README 称只发布 train、val；没有 test 时正式结果只报告 val，并在论文写明。
+服务器访问 GitHub 超时时，用 Git bundle 传提交，再执行 `git merge --ff-only FETCH_HEAD`。
 
-```bash
-ls -la /root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/
-```
+test 图像已解压到 `JPEGImages/test`（11,613 张），标注是 `Annotations/test.json`。
 
 ## 启动
 
-脚本只在 GPU 0、1 都空闲时启动，不排队，也不会停止其他任务。先跑 P0：
+脚本只在 GPU 0、1 都空闲时启动，不排队，也不会停止其他任务。P0：
 
 ```bash
 cd /root/zxy/deim
@@ -62,7 +62,7 @@ conda activate deim_zxy
 EXPERIMENT_ROOT=/root/zxy/experiments INITIAL_WEIGHTS=/root/zxy/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth RUN_PREFIX=deim_m_sardet100k bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml
 ```
 
-P0 结束后跑 P4：
+P4（未运行，只在需要长日程时使用）：
 
 ```bash
 cd /root/zxy/deim
@@ -122,6 +122,20 @@ STAGE=best_stg1
 EVAL=$(mktemp -d "$OUT/eval_${STAGE}_XXXXXX")
 ulimit -Sn 65535
 CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py -c "$OUT/resolved_config.yml" -r "$OUT/$STAGE.pth" --test-only --use-amp --output-dir "$EVAL" --summary-dir "$EVAL/summary" 2>&1 | tee "$EVAL/console.log"
+```
+
+## test 评估
+
+只用于最终方法和基线。先按 val AP 选好权重，把 `STAGE` 改成对应的文件名：
+
+```bash
+cd /root/zxy/deim
+source /opt/miniconda3/etc/profile.d/conda.sh
+conda activate deim_zxy
+STAGE=best_stg2
+EVAL=$(mktemp -d "$OUT/test_eval_${STAGE}_XXXXXX")
+ulimit -Sn 65535
+CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py -c "$OUT/resolved_config.yml" -r "$OUT/$STAGE.pth" --test-only --seed 0 --use-amp --output-dir "$EVAL" --summary-dir "$EVAL/summary" -u val_dataloader.dataset.img_folder=/root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/test val_dataloader.dataset.ann_file=/root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/test.json 2>&1 | tee "$EVAL/console.log"
 ```
 
 ## 恢复
