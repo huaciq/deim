@@ -31,7 +31,8 @@
 | ID | 方法 | 种子 | 最佳轮 | AP | ΔAP | AP50 | AP75 | APs | APm | APl | AR100 | ship | aircraft | car | tank | bridge | harbor | 参数量 | 训练时长 | 状态 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | E000 | 基线 | 0 | 35 | 65.29 | — | 93.15 | 70.26 | 60.18 | 76.63 | 72.09 | 73.36 | 73.75 | 62.78 | 71.21 | 57.66 | 45.97 | 80.40 | 19.48M | 17:38 | 基线 |
-| E001 | M1 成像—标注几何解耦 | 0 | | | | | | | | | | | | | | | | | | 筛选中 |
+| E001 | M1 成像—标注几何解耦 | 0 | | | | | | | | | | | | | | | | | | 中止（第 2 轮后，用户决定不作为方法，无结论） |
+| E002 | GREA 保护环证据注意力 | 0 | | | | | | | | | | | | | | | | | | 筛选中 |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -47,6 +48,7 @@
 | --- | --- | --- | --- |
 | E000 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml` | `455b196` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261105_125147_N2zAJh` |
 | E001 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32.yml` | `8e83207` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32_seed0_20261106_145049_1Gh5VI` |
+| E002 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml` | `10015d1` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_grea_36e_b32_seed0_20261106_161421_p4o6KB` |
 
 ## 备注
 

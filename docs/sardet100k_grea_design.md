@@ -1,6 +1,6 @@
 # GREA：保护环证据注意力
 
-日期：2026-11-06。只针对 SARDet-100K。已实现，尚未训练。代码 `engine/deim/guard_ring_evidence.py`，配置 `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml`，测试 `tests/test_guard_ring_evidence.py`。M1 不再作为研究方法：它修正的是标注，不是检测能力。原 M2（可学习 CFAR）并入本设计。
+日期：2026-11-06。只针对 SARDet-100K。已实现，E002 训练中（新服务器，`10015d1`，seed 0），结果未出。代码 `engine/deim/guard_ring_evidence.py`，配置 `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml`，测试 `tests/test_guard_ring_evidence.py`。M1 不再作为研究方法：它修正的是标注，不是检测能力。原 M2（可学习 CFAR）并入本设计。
 
 核心问题：**小目标和没见过的目标缺少不依赖上下文的目标证据。** 背景换成常数后，长边 <16 的已检出目标只剩 16.3%，长边 ≥16 的有 77.9%；没见过的 49.4%，见过的 68.2%。
 
@@ -165,6 +165,12 @@ TensorBoard：
 
 ```bash
 tensorboard --logdir "$OUT/summary" --host 0.0.0.0 --port 6006
+```
+
+停止运行时，只杀 `launcher.pid` 会留下占显存的 DataLoader worker，还要杀参数里带该运行目录的 `train.py` 进程：
+
+```bash
+kill $(cat "$OUT/launcher.pid"); sleep 5; kill $(ps -eo pid,args | grep train.py | grep "$OUT" | grep -v grep | awk '{print $1}')
 ```
 
 恢复（确认进程已停止）：
