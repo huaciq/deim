@@ -56,3 +56,7 @@
   按整图相似度（≥0.95）分组，test 差距小得多：66.01 对 63.60。两组的难度可能本来就不同，所以这个差距不能全部归因于重复图。
   只作诊断，官方划分不变。结果在运行目录的 `independent_verify_20261106/report.json`。
 - test aircraft 49.80，明显低于 val 的 62.78，原因未查。
+
+### E000 错误诊断
+
+见 [基线诊断](sardet100k_baseline_diagnosis.md)。
