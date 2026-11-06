@@ -72,6 +72,7 @@ train = cfg['train_dataloader']
 collate = train.get('collate_fn', {})
 criterion = cfg.get('DEIMCriterion', {})
 modules = {
+    'imaging_geometry': bool(cfg.get('DFINETransformer', {}).get('use_imaging_geometry', False)),
     'scs': bool(cfg.get('DFINETransformer', {}).get('use_scs', False)),
     'slqc': bool(cfg.get('DFINETransformer', {}).get('use_slqc', False)),
     'slqc_mode': cfg.get('DFINETransformer', {}).get('slqc_mode', 'layout'),

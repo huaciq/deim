@@ -119,6 +119,48 @@ class DEIMCriterion(nn.Module):
                          not {'loss_bccq_type', 'loss_bccq_quality'}.issubset(weight_dict)):
             raise ValueError('BCCQ requires mal dispatch, explicit type/quality weights and no SDCP.')
 
+    def loss_imaging_geometry(self, outputs, targets, indices):
+        """Supervise translation and edge extension on final-layer matches of clean samples.
+
+        Inputs are detached, so gradients reach only the geometry head. Smooth L1
+        with a small beta gives a robust translation estimate under heavy-tailed
+        label noise. Truncated and border boxes do not vote for the translation.
+        """
+        with torch.autocast(device_type=outputs['pred_boxes'].device.type, enabled=False):
+            translation = outputs['geometry_translation'].float()
+            extension = outputs['geometry_extension'].float()
+            gate = outputs['geometry_edge_gate']
+            unit = outputs['geometry_translation_unit']
+            boxes = outputs['pred_boxes'].detach().float()
+            translation_terms, extension_terms = [], []
+            for image, (source, target_index) in enumerate(indices):
+                target = targets[image]
+                if not target.get('geometry_clean', False) or not len(source):
+                    continue
+                predicted = box_cxcywh_to_xyxy(boxes[image, source])
+                response = box_cxcywh_to_xyxy(torch.as_tensor(target['boxes'])[target_index].float())
+                official = target['official_xyxy'][target_index].float()
+                overflow = target['official_overflow'][target_index].float()
+                good = torch.diag(box_iou(predicted, response)[0]) >= .5
+                edges = gate[image, source]
+                interior = good & ~edges.any(-1) & (overflow.max(-1).values <= 1e-6)
+                if interior.any():
+                    residual = ((official[interior, :2] + official[interior, 2:]) -
+                                (predicted[interior, :2] + predicted[interior, 2:])) / 2 * unit
+                    residual = residual * residual.new_tensor([float(target['flip_state']), 1.])
+                    translation_terms.append(F.smooth_l1_loss(
+                        translation[image].expand_as(residual), residual, beta=.5, reduction='none').sum(-1))
+                if good.any():
+                    size = (predicted[good, 2:] - predicted[good, :2]).clamp_min(1e-4).repeat(1, 2)
+                    wanted = (overflow[good] / size).clamp(0., 1.5)
+                    selected = edges[good]
+                    if selected.any():
+                        extension_terms.append(F.l1_loss(extension[image, source][good][selected], wanted[selected], reduction='none'))
+            connected = translation.sum() * 0. + extension.sum() * 0.
+            translation_loss = torch.cat(translation_terms).mean() if translation_terms else translation.new_zeros(())
+            extension_loss = torch.cat(extension_terms).mean() if extension_terms else extension.new_zeros(())
+        return {'loss_geo_translation': translation_loss + connected, 'loss_geo_extension': extension_loss + connected}
+
     def loss_bccq(self, outputs, targets, indices, num_boxes, **kwargs):
         """Unweighted positive type CE and scalar MAL-style IoU-quality supervision.
 
@@ -501,6 +543,8 @@ class DEIMCriterion(nn.Module):
             for name in ['pre_outputs', 'dn_pre_outputs']:
                 if name in outputs:
                     outputs[name]['sdcp_image_size'] = image_size
+        # Imaging geometry supervises every detection loss with the response box.
+        targets = outputs.get('geometry_response_targets', targets)
         outputs_without_aux = {k: v for k, v in outputs.items() if 'aux' not in k}
 
         # Retrieve the matching between the outputs of the last layer and the targets
@@ -728,6 +772,10 @@ class DEIMCriterion(nn.Module):
             if 'loss_mdcc_ortho' not in self.weight_dict:
                 raise ValueError('MDCC requires weight_dict.loss_mdcc_ortho.')
             losses['loss_mdcc_ortho'] = outputs['mdcc_ortho'] * self.weight_dict['loss_mdcc_ortho']
+
+        if 'geometry_translation' in outputs:
+            geometry = self.loss_imaging_geometry(outputs, targets, indices)
+            losses.update({name: value * self.weight_dict[name] for name, value in geometry.items()})
 
         # Keep numerical failures visible to the engine before backward.
         # Replacing a NaN loss with zero does not repair its backward graph.

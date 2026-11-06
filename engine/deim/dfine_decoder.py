@@ -31,6 +31,7 @@ from .query_prototypes import QueryPrototypeHead
 from .band_conditioned_queries import BandConditionedClassQueries, joint_detection_logits
 from .orthogonal_topology_attention import OrthogonalTopologyDeformAttn
 from .symmetric_topology_attention import SymmetricOrthogonalTopologyDeformAttn
+from .imaging_geometry import ImagingGeometryHead
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -783,6 +784,14 @@ class DFINETransformer(nn.Module):
                  bccq_roi_size=5,
                  bccq_query_chunk_size=64,
                  bccq_checkpoint=True,
+                 use_imaging_geometry=False,
+                 geometry_use_translation=True,
+                 geometry_use_amodal=True,
+                 geometry_num_domains=4,
+                 geometry_embed_dim=128,
+                 geometry_amodal_dim=128,
+                 geometry_border_margin=.01,
+                 geometry_translation_unit=256.,
                  ):
         super().__init__()
         if use_mdcc and (use_sdcp or use_bccq or use_slqc or query_select_method == 'agnostic'):
@@ -1020,6 +1029,17 @@ class DFINETransformer(nn.Module):
                     MagnitudeDecoupledCosineClassifier(head, mdcc_tau_min, mdcc_tau_max)
                     for head in self.dec_score_head])
 
+        self.imaging_geometry = None
+        if use_imaging_geometry:
+            if layer_scale != 1:
+                raise ValueError('Imaging geometry requires layer_scale=1.')
+            # Keep common initialization and the later data/denoising RNG unchanged.
+            with torch.random.fork_rng(devices=[]):
+                self.imaging_geometry = ImagingGeometryHead(
+                    hidden_dim, num_levels, geometry_num_domains, geometry_embed_dim, geometry_amodal_dim,
+                    geometry_border_margin, geometry_translation_unit,
+                    geometry_use_translation, geometry_use_amodal)
+
     def convert_to_deploy(self):
         self.scs_head = None
         self.use_scs = False
@@ -1207,13 +1227,21 @@ class DFINETransformer(nn.Module):
 
         return topk_memory, topk_logits, topk_anchors
 
-    def forward(self, feats, targets=None, image_size=None):
+    def forward(self, feats, targets=None, image_size=None, images=None):
         # input projection and embedding
         memory, spatial_shapes = self._get_encoder_input(feats)
         if self.use_sdcp:
             if image_size is None:
                 image_size = [side * self.feat_strides[0] for side in spatial_shapes[0]]
             image_size = torch.as_tensor(image_size, dtype=torch.float32, device=memory.device)
+
+        geometry_translation = geometry_probabilities = None
+        if self.imaging_geometry is not None:
+            geometry_translation, geometry_probabilities = self.imaging_geometry.translation(
+                memory, spatial_shapes, images)
+            if self.training:
+                # Denoising, matching and every box loss now use the response box.
+                targets = self.imaging_geometry.response_targets(targets, geometry_translation.detach())
 
         # prepare denoising training
         if self.training and self.num_denoising > 0:
@@ -1233,7 +1261,8 @@ class DFINETransformer(nn.Module):
             self._get_decoder_input(memory, spatial_shapes, denoising_logits, denoising_bbox_unact)
 
         # decoder
-        need_queries = self.slqc is not None or (self.training and (self.use_scs or self.mpq_head is not None))
+        need_queries = self.slqc is not None or (self.training and (self.use_scs or self.mpq_head is not None)) \
+            or (self.imaging_geometry is not None and self.imaging_geometry.use_amodal)
         decoder_results = self.decoder(
             init_ref_contents,
             init_ref_points_unact,
@@ -1308,6 +1337,17 @@ class DFINETransformer(nn.Module):
             out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1],
                    'pred_corners': out_corners[-1], 'ref_points': out_refs[-1],
                    'up': self.up, 'reg_scale': self.reg_scale}
+
+        if self.imaging_geometry is not None:
+            extension, edge_gate = self.imaging_geometry.extension(final_queries, out['pred_boxes'], memory, spatial_shapes)
+            if self.training:
+                out.update(geometry_translation=geometry_translation, geometry_probabilities=geometry_probabilities,
+                           geometry_extension=extension, geometry_edge_gate=edge_gate,
+                           geometry_translation_unit=self.imaging_geometry.translation_unit,
+                           geometry_response_targets=targets)
+            else:
+                out['response_boxes'] = out['pred_boxes']
+                out['pred_boxes'] = self.imaging_geometry.compose(out['pred_boxes'], geometry_translation, extension)
 
         if self.use_scs and self.training:
             out['pred_scs'] = self.scs_head(final_queries)

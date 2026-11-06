@@ -246,6 +246,42 @@ class RandomIoUCrop(T.RandomIoUCrop):
 
 
 @register()
+class GeometryHorizontalFlip(T.Transform):
+    """Horizontal flip that records its state and mirrors the packed official overflow."""
+
+    def __init__(self, p=0.5) -> None:
+        super().__init__()
+        self.p = p
+        self.flip = T.RandomHorizontalFlip(p=1.0)
+
+    def forward(self, *inputs: Any) -> Any:
+        inputs = inputs if len(inputs) > 1 else inputs[0]
+        image, target, dataset = inputs
+        flipped = torch.rand(1).item() < self.p
+        if flipped:
+            image, target = self.flip(image, target)
+            labels = target['labels'].clone()
+            labels[:, [1, 3]] = labels[:, [3, 1]]
+            target['labels'] = labels
+        target['flip_state'] = torch.tensor(-1. if flipped else 1.)
+        return image, target, dataset
+
+
+@register()
+class GeometryTargets(T.Transform):
+    """Split the packed labels at the end of the pipeline; Mosaic samples are not clean."""
+
+    def forward(self, *inputs: Any) -> Any:
+        inputs = inputs if len(inputs) > 1 else inputs[0]
+        image, target, dataset = inputs
+        packed = target['labels']
+        target['labels'] = packed[:, 0].long()
+        target['official_overflow'] = packed[:, 1:5].float()
+        target['geometry_clean'] = torch.tensor(target['idx'].numel() == 1)
+        return image, target, dataset
+
+
+@register()
 class ConvertBoxes(T.Transform):
     _transformed_types = (
         BoundingBoxes,

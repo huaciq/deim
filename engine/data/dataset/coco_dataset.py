@@ -29,10 +29,11 @@ class CocoDetection(torchvision.datasets.CocoDetection, DetDataset):
     __inject__ = ['transforms', ]
     __share__ = ['remap_mscoco_category']
 
-    def __init__(self, img_folder, ann_file, transforms, return_masks=False, remap_mscoco_category=False):
+    def __init__(self, img_folder, ann_file, transforms, return_masks=False, remap_mscoco_category=False,
+                 keep_overflow=False):
         super(CocoDetection, self).__init__(img_folder, ann_file)
         self._transforms = transforms
-        self.prepare = ConvertCocoPolysToMask(return_masks)
+        self.prepare = ConvertCocoPolysToMask(return_masks, keep_overflow)
         self.img_folder = img_folder
         self.ann_file = ann_file
         self.return_masks = return_masks
@@ -108,8 +109,9 @@ def convert_coco_poly_to_mask(segmentations, height, width):
 
 
 class ConvertCocoPolysToMask(object):
-    def __init__(self, return_masks=False):
+    def __init__(self, return_masks=False, keep_overflow=False):
         self.return_masks = return_masks
+        self.keep_overflow = keep_overflow
 
     def __call__(self, image: Image.Image, target, **kwargs):
         w, h = image.size
@@ -125,6 +127,9 @@ class ConvertCocoPolysToMask(object):
         # guard against no boxes via resizing
         boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
         boxes[:, 2:] += boxes[:, :2]
+        # Fraction of the image each official edge lies beyond the border: left, top, right, bottom.
+        scale = torch.tensor([w, h, w, h], dtype=torch.float32)
+        overflow = torch.cat((-boxes[:, :2], boxes[:, 2:] - scale[:2]), 1).clamp_min(0) / scale
         boxes[:, 0::2].clamp_(min=0, max=w)
         boxes[:, 1::2].clamp_(min=0, max=h)
 
@@ -135,6 +140,10 @@ class ConvertCocoPolysToMask(object):
             labels = [obj["category_id"] for obj in anno]
 
         labels = torch.tensor(labels, dtype=torch.int64)
+        if self.keep_overflow:
+            # torchvision allows one BoundingBoxes per sample. Packing the overflow in
+            # labels keeps it aligned through Mosaic and Sanitize; GeometryTargets splits it.
+            labels = torch.cat((labels[:, None].float(), overflow), 1)
 
         if self.return_masks:
             segmentations = [obj["segmentation"] for obj in anno]

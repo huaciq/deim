@@ -1,0 +1,38 @@
+# M1: imaging-annotation geometry decoupling on the fixed 36-epoch E000 protocol.
+# Only the geometry head, its targets and the two pipeline steps below differ from E000.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_m1_imaging_geometry.md
+experiment_baseline_revision: 455b196
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_m1_geometry_36e_b32/seed0
+
+DFINETransformer:
+  use_imaging_geometry: True
+  geometry_use_translation: True
+  geometry_use_amodal: True
+  geometry_num_domains: 4
+  geometry_embed_dim: 128
+  geometry_amodal_dim: 128
+  geometry_border_margin: 0.01
+  geometry_translation_unit: 256.
+
+DEIMCriterion:
+  weight_dict:
+    loss_geo_translation: 1.
+    loss_geo_extension: 1.
+
+train_dataloader:
+  dataset:
+    keep_overflow: True
+    transforms:
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5], probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: GeometryHorizontalFlip, p: 0.5}
+        - {type: Resize, size: [640, 640]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+        - {type: GeometryTargets}
