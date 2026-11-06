@@ -119,6 +119,36 @@ class DEIMCriterion(nn.Module):
                          not {'loss_bccq_type', 'loss_bccq_quality'}.issubset(weight_dict)):
             raise ValueError('BCCQ requires mal dispatch, explicit type/quality weights and no SDCP.')
 
+    def loss_grea_evidence(self, outputs, targets, indices, num_boxes):
+        """Focal classification of target evidence on the final-layer matches."""
+        with torch.autocast(device_type=outputs['pred_logits'].device.type, enabled=False):
+            logits = outputs['grea_evidence_logits'].float()
+            idx = self._get_src_permutation_idx(indices)
+            labels = torch.cat([t['labels'][j] for t, (_, j) in zip(targets, indices)])
+            wanted = torch.zeros_like(logits)
+            wanted[idx[0], idx[1], labels] = 1.
+            loss = torchvision.ops.sigmoid_focal_loss(logits, wanted, self.alpha, self.gamma, reduction='none')
+            return loss.mean(1).sum() * logits.shape[1] / num_boxes
+
+    @torch.no_grad()
+    def _record_grea_metrics(self, outputs, targets, indices):
+        """Per-class gate sums for matched queries; divide by the positive count for a mean."""
+        idx = self._get_src_permutation_idx(indices)
+        labels = torch.cat([t['labels'][j] for t, (_, j) in zip(targets, indices)])
+        gates = outputs['grea_gate'][idx].float()
+        stats = gates.new_zeros(self.num_classes, 4)
+        stats.index_add_(0, labels, torch.cat((gates, torch.ones_like(gates[:, :1])), -1))
+        if is_dist_available_and_initialized():
+            torch.distributed.all_reduce(stats)
+        metrics = {}
+        for category in range(self.num_classes):
+            metrics[f'grea_positive_c{category}'] = stats[category, 3]
+            for position, name in enumerate(('target', 'clutter', 'contrast')):
+                metrics[f'grea_gate_sum_c{category}_{name}'] = stats[category, position]
+        for layer, value in enumerate(outputs['grea_alpha']):
+            metrics[f'grea_alpha_{layer}'] = value
+        self.bccq_metrics = metrics
+
     def loss_imaging_geometry(self, outputs, targets, indices):
         """Supervise translation and edge extension on final-layer matches of clean samples.
 
@@ -772,6 +802,10 @@ class DEIMCriterion(nn.Module):
             if 'loss_mdcc_ortho' not in self.weight_dict:
                 raise ValueError('MDCC requires weight_dict.loss_mdcc_ortho.')
             losses['loss_mdcc_ortho'] = outputs['mdcc_ortho'] * self.weight_dict['loss_mdcc_ortho']
+
+        if 'grea_evidence_logits' in outputs:
+            losses['loss_grea_evidence'] = self.loss_grea_evidence(outputs, targets, indices, num_boxes) * self.weight_dict['loss_grea_evidence']
+            self._record_grea_metrics(outputs, targets, indices)
 
         if 'geometry_translation' in outputs:
             geometry = self.loss_imaging_geometry(outputs, targets, indices)

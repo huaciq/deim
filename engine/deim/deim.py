@@ -27,6 +27,11 @@ class DEIM(nn.Module):
         image_size = x.shape[-2:]
         images = x
         x = self.backbone(x)
+        local_features = None
+        if getattr(self.decoder, 'grea_pyramid', None) is not None:
+            # Backbone returns S2, S3, S4, S5. The encoder keeps its usual three stages.
+            local_features = x[:2]
+            x = x[1:]
 
         # Handle encoder output (may include boundary_output and/or spi_outputs)
         encoder_out = self.encoder(x)
@@ -49,7 +54,9 @@ class DEIM(nn.Module):
             x = encoder_out
 
         # Pass to decoder
-        if getattr(self.decoder, 'imaging_geometry', None) is not None:
+        if local_features is not None:
+            decoder_out = self.decoder(x, targets, image_size=image_size, local_features=local_features)
+        elif getattr(self.decoder, 'imaging_geometry', None) is not None:
             decoder_out = self.decoder(x, targets, image_size=image_size, images=images)
         elif getattr(self.decoder, 'use_sdcp', False):
             decoder_out = self.decoder(x, targets, image_size=image_size)

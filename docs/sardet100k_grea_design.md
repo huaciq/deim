@@ -1,6 +1,6 @@
-# GREA：保护环证据注意力（设计稿，未实现）
+# GREA：保护环证据注意力
 
-日期：2026-11-06。只针对 SARDet-100K。M1 不再作为研究方法：它修正的是标注，不是检测能力。原 M2（可学习 CFAR）并入本设计。
+日期：2026-11-06。只针对 SARDet-100K。已实现，尚未训练。代码 `engine/deim/guard_ring_evidence.py`，配置 `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml`，测试 `tests/test_guard_ring_evidence.py`。M1 不再作为研究方法：它修正的是标注，不是检测能力。原 M2（可学习 CFAR）并入本设计。
 
 核心问题：**小目标和没见过的目标缺少不依赖上下文的目标证据。** 背景换成常数后，长边 <16 的已检出目标只剩 16.3%，长边 ≥16 的有 77.9%；没见过的 49.4%，见过的 68.2%。
 
@@ -103,6 +103,75 @@ SAR-AIRcraft 上的模块大多无效，这里也有解释：aircraft 只看目�
 | 机制指标 3 | tank、ship 的 AP 上涨，且不靠 aircraft |
 | 证伪 | AP 涨幅不到 0.5；或 AP 涨了但机制指标 1 不变，说明增益不是这个机制带来的 |
 | 消融 | 基线；只加低感受野来源；加保护环；加门控；完整方法 |
+
+## 实现要点
+
+- **证据来源：** HGNetv2 返回 S2、S3、S4、S5，`DEIM` 把 S2、S3 给 GREA，S3、S4、S5 给编码器。S2、S3 投影到 128 维，梯度回传到骨干。
+- **位置：** M 的解码器有 4 层，GREA 作用于最后两层，每层一个模块，在原交叉注意力和 FFN 之后、回归头之前，残差加到 query 上。
+- **采样：** 每路 8 个点。核心点 `c + tanh(o) · 半框`，一定在框内。参考点沿 8 个固定方向，距离为 `半框 · r + 保护带`，r 在 1.25–2 之间可学习，保护带至少是 S2 的一个格子。超出图像的点不参与（全部超出时用边界值）。框停止梯度。
+- **门控：** `MLP(query, 类别概率)` 输出三路 softmax，类别分数停止梯度，初始均匀。
+- **深监督：** 最后一层的 T 接共享分类头，用最后一层的匹配和 focal 损失，权重 1。
+- **日志：** `train_grea_alpha_*`、`train_grea_positive_c*`、`train_grea_gate_sum_c*_{target,clutter,contrast}`。门控均值 = sum 除以 positive，用于机制指标 2。
+- **机制指标 1：** 训练后用 `tools/sardet100k/context_masks.py` 运行，抽样种子和 E000 相同。
+
+文献复查（2026-11-06）：Focal DETR、Better Sampling（小目标）、Decoupled DETR 都改动解码器采样，但未把目标、保护环、参考环分开并做类别门控。两轮检索未发现相同结构，不能证明没有。
+
+## 服务器命令（新服务器）
+
+服务器访问 GitHub 超时时，用 Git bundle 传提交，再执行 `git merge --ff-only FETCH_HEAD`。
+
+```bash
+cd /root/zxy/deim
+git status --short --branch
+git fetch origin
+git switch main
+git pull --ff-only origin main
+source /opt/miniconda3/etc/profile.d/conda.sh
+conda activate deim_zxy
+```
+
+启动（两张卡都空闲才会启动，不排队）：
+
+```bash
+EXPERIMENT_ROOT=/root/zxy/experiments INITIAL_WEIGHTS=/root/zxy/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth RUN_PREFIX=deim_m_sardet100k bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml
+```
+
+重连：
+
+```bash
+export OUT=$(ls -dt /root/zxy/experiments/deim_m_sardet100k_*grea* | head -n 1); echo "$OUT"
+tail -f "$OUT/console.log"
+```
+
+GPU：
+
+```bash
+watch -n 2 nvidia-smi
+```
+
+指标：
+
+```bash
+python -c 'import json,os; rows=[json.loads(s) for s in open(os.environ["OUT"]+"/log.txt") if s.strip()]; r=max(rows,key=lambda x:x["test_coco_eval_bbox"][0]); print(r["epoch"],[round(100*x,2) for x in r["test_coco_eval_bbox"][:6]])'
+```
+
+门控和 α（最新一轮）：
+
+```bash
+python -c 'import json,os; r=[json.loads(s) for s in open(os.environ["OUT"]+"/log.txt") if s.strip()][-1]; print({k:round(v,4) for k,v in r.items() if "grea_alpha" in k}); names=["ship","aircraft","car","tank","bridge","harbor"]; [print(n,[round(r[f"train_grea_gate_sum_c{i}_{k}"]/max(r[f"train_grea_positive_c{i}"],1e-6),3) for k in ("target","clutter","contrast")]) for i,n in enumerate(names)]'
+```
+
+TensorBoard：
+
+```bash
+tensorboard --logdir "$OUT/summary" --host 0.0.0.0 --port 6006
+```
+
+恢复（确认进程已停止）：
+
+```bash
+cd /root/zxy/deim && bash tools/run_sar_module_experiment.sh --resume "$OUT"
+```
 
 ## 局限和风险
 

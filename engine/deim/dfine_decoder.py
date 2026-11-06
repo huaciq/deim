@@ -32,6 +32,7 @@ from .band_conditioned_queries import BandConditionedClassQueries, joint_detecti
 from .orthogonal_topology_attention import OrthogonalTopologyDeformAttn
 from .symmetric_topology_attention import SymmetricOrthogonalTopologyDeformAttn
 from .imaging_geometry import ImagingGeometryHead
+from .guard_ring_evidence import GuardRingEvidence, LocalEvidencePyramid
 from ..core import register
 
 __all__ = ['DFINETransformer']
@@ -571,6 +572,7 @@ class TransformerDecoder(nn.Module):
         self.use_sdcp = False
         self.sdcp_sampler = None
         self.bccq = None
+        self.grea_layers = None
 
     def value_op(self, memory, value_proj, value_scale, memory_mask, memory_spatial_shapes):
         """
@@ -605,8 +607,10 @@ class TransformerDecoder(nn.Module):
                 memory_mask=None,
                 dn_meta=None,
                 return_query_features=False,
-                image_size=None):
+                image_size=None,
+                local_maps=None):
         output = target
+        grea_result = None
         output_detach = pred_corners_undetach = 0
         value = self.value_op(memory, None, None, memory_mask, spatial_shapes)
         local_feature = None
@@ -642,6 +646,15 @@ class TransformerDecoder(nn.Module):
                 output_detach = output.detach()
 
             output = layer(output, ref_points_input, value, spatial_shapes, attn_mask, query_pos_embed)
+
+            if self.grea_layers is not None and str(i) in self.grea_layers:
+                # score_head is an Identity for dropped layers after deploy conversion.
+                class_scores = score_head[i](output)
+                if class_scores.shape[-1] == output.shape[-1]:
+                    class_scores = output.new_zeros(*output.shape[:2], self.grea_layers[str(i)].gate[0].in_features - output.shape[-1])
+                delta, grea_target, grea_gate = self.grea_layers[str(i)](output, ref_points_detach, local_maps, class_scores)
+                output = output + delta
+                grea_result = (grea_target, grea_gate)
 
             if i == 0 :
                 # Initial bounding box predictions with inverse sigmoid refinement
@@ -702,6 +715,8 @@ class TransformerDecoder(nn.Module):
             result += (raw_scores,)
         if self.bccq is not None:
             result += ({name: torch.stack(values) for name, values in bccq_outputs.items()},)
+        if self.grea_layers is not None:
+            result += (grea_result,)
         return result
 
 
@@ -792,6 +807,12 @@ class DFINETransformer(nn.Module):
                  geometry_amodal_dim=128,
                  geometry_border_margin=.01,
                  geometry_translation_unit=256.,
+                 use_grea=False,
+                 grea_local_channels=[96, 384],
+                 grea_dim=128,
+                 grea_points=8,
+                 grea_num_layers=2,
+                 grea_ring=[1.25, 2.],
                  ):
         super().__init__()
         if use_mdcc and (use_sdcp or use_bccq or use_slqc or query_select_method == 'agnostic'):
@@ -1040,6 +1061,22 @@ class DFINETransformer(nn.Module):
                     geometry_border_margin, geometry_translation_unit,
                     geometry_use_translation, geometry_use_amodal)
 
+        self.grea_pyramid = None
+        self.grea_evidence_head = None
+        if use_grea:
+            if layer_scale != 1 or use_bccq or use_sdcp or use_imaging_geometry:
+                raise ValueError('GREA requires layer_scale=1 and no BCCQ, SDCP or imaging geometry.')
+            if not 0 < grea_num_layers < num_layers or eval_idx != -1:
+                raise ValueError('GREA needs 0 < grea_num_layers < num_layers and eval_idx=-1.')
+            # Keep common initialization and the later data/denoising RNG unchanged.
+            with torch.random.fork_rng(devices=[]):
+                self.grea_pyramid = LocalEvidencePyramid(grea_local_channels, grea_dim)
+                self.decoder.grea_layers = nn.ModuleDict({
+                    str(layer): GuardRingEvidence(hidden_dim, num_classes, len(grea_local_channels), grea_dim, grea_points, tuple(grea_ring))
+                    for layer in range(num_layers - grea_num_layers, num_layers)})
+                self.grea_evidence_head = nn.Linear(grea_dim, num_classes)
+                init.constant_(self.grea_evidence_head.bias, bias_init_with_prob(0.01))
+
     def convert_to_deploy(self):
         self.scs_head = None
         self.use_scs = False
@@ -1227,7 +1264,7 @@ class DFINETransformer(nn.Module):
 
         return topk_memory, topk_logits, topk_anchors
 
-    def forward(self, feats, targets=None, image_size=None, images=None):
+    def forward(self, feats, targets=None, image_size=None, images=None, local_features=None):
         # input projection and embedding
         memory, spatial_shapes = self._get_encoder_input(feats)
         if self.use_sdcp:
@@ -1278,9 +1315,11 @@ class DFINETransformer(nn.Module):
             attn_mask=attn_mask,
             dn_meta=dn_meta,
             return_query_features=need_queries,
-            image_size=image_size)
+            image_size=image_size,
+            local_maps=self.grea_pyramid(local_features) if self.grea_pyramid is not None else None)
 
         out_bboxes, out_logits, out_corners, out_refs, pre_bboxes, pre_logits = decoder_results[:6]
+        grea_target, grea_gate = decoder_results[-1] if self.grea_pyramid is not None else (None, None)
         final_queries = decoder_results[6] if need_queries else None
         sdcp_logits = decoder_results[-1] if self.use_sdcp and self.training else None
         bccq_results = decoder_results[-1] if self.use_bccq else None
@@ -1297,6 +1336,9 @@ class DFINETransformer(nn.Module):
             dn_out_refs, out_refs = torch.split(out_refs, dn_meta['dn_num_split'], dim=2)
             if final_queries is not None:
                 _, final_queries = torch.split(final_queries, dn_meta['dn_num_split'], dim=1)
+            if grea_target is not None:
+                _, grea_target = torch.split(grea_target, dn_meta['dn_num_split'], dim=1)
+                _, grea_gate = torch.split(grea_gate, dn_meta['dn_num_split'], dim=1)
             if sdcp_logits is not None:
                 _, sdcp_logits = torch.split(sdcp_logits, dn_meta['dn_num_split'], dim=1)
             if bccq_results is not None:
@@ -1348,6 +1390,12 @@ class DFINETransformer(nn.Module):
             else:
                 out['response_boxes'] = out['pred_boxes']
                 out['pred_boxes'] = self.imaging_geometry.compose(out['pred_boxes'], geometry_translation, extension)
+
+        if self.grea_pyramid is not None and self.training:
+            # Target evidence must separate targets by itself; used only in training.
+            out['grea_evidence_logits'] = self.grea_evidence_head(grea_target)
+            out['grea_gate'] = grea_gate
+            out['grea_alpha'] = torch.stack([layer.alpha.detach() for layer in self.decoder.grea_layers.values()])
 
         if self.use_scs and self.training:
             out['pred_scs'] = self.scs_head(final_queries)

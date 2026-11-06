@@ -1,0 +1,23 @@
+# GREA on the fixed 36-epoch E000 protocol. Only the module and its supervision differ.
+# See docs/sardet100k_grea_design.md.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_grea_design.md
+experiment_baseline_revision: 455b196
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_grea_36e_b32/seed0
+
+HGNetv2:
+  return_idx: [0, 1, 2, 3]
+
+DFINETransformer:
+  use_grea: True
+  grea_local_channels: [96, 384]
+  grea_dim: 128
+  grea_points: 8
+  grea_num_layers: 2
+  grea_ring: [1.25, 2.]
+
+DEIMCriterion:
+  weight_dict:
+    loss_grea_evidence: 1.
