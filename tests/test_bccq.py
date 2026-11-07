@@ -364,7 +364,7 @@ class BCCQTests(unittest.TestCase):
             source.write_text(yaml.safe_dump(cfg), encoding='utf-8')
             run = temporary / 'run'
             run.mkdir()
-            environment = dict(OUT=str(run), CONFIG=str(source), MODE='new', ATTEMPT='new',
+            environment = dict(OUT=str(run), CONFIG=str(source), MODE='new', ATTEMPT='new', GPU_IDS='0,1',
                                INITIAL='/home/zxy/sar/pretrain/deim/deim_dfine_hgnetv2_m_coco_90e.pth')
             with patch.dict(os.environ, environment), redirect_stdout(io.StringIO()):
                 exec(compile(program, 'run_sar_module_experiment.sh:metadata', 'exec'), {})

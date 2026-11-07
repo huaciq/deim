@@ -3,7 +3,13 @@
 # Usage: bash tools/run_sar_module_experiment.sh CONFIG
 #        bash tools/run_sar_module_experiment.sh --resume RUN
 # Optional new-run settings: EXPERIMENT_ROOT, INITIAL_WEIGHTS and RUN_PREFIX.
+# Optional for both modes: GPU_IDS, comma-separated physical GPUs (default 0,1).
 set -e
+GPU_IDS=${GPU_IDS:-0,1}
+if ! [[ "$GPU_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+    printf 'GPU_IDS must be comma-separated GPU indices, got: %s\n' "$GPU_IDS" >&2
+    exit 2
+fi
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO_ROOT"
 CONDA_BASE=$(conda info --base)
@@ -36,7 +42,7 @@ else
     printf '%s\n' 'Usage: run_sar_module_experiment.sh CONFIG | --resume RUN' >&2
     exit 2
 fi
-export MODE CONFIG INITIAL OUT ATTEMPT LOG GATE COMMAND REPO_ROOT CONDA_BASE
+export MODE CONFIG INITIAL OUT ATTEMPT LOG GATE COMMAND REPO_ROOT CONDA_BASE GPU_IDS
 
 python - <<'PY'
 import json
@@ -53,6 +59,7 @@ mode = os.environ['MODE']
 cfg = load_config(str(source), {})
 cfg.pop('__include__', None)
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+devices = [int(i) for i in os.environ['GPU_IDS'].split(',')]
 if mode == 'new':
     cfg.update(output_dir=str(run), summary_dir=str(run / 'summary'))
     (run / 'source_config.yml').write_text(source.read_text(), encoding='utf-8')
@@ -113,8 +120,8 @@ modules = {
 metadata = dict(
     mode=mode, source_config=str(source), output_dir=str(run),
     current_git_revision=revision, baseline_revision=cfg.get('experiment_baseline_revision', 'a448005'), modules=modules,
-    seed=cfg.get('seed', 0), devices=[0, 1], world_size=2,
-    global_batch=train['total_batch_size'], batch_per_gpu=train['total_batch_size'] // 2,
+    seed=cfg.get('seed', 0), devices=devices, world_size=len(devices),
+    global_batch=train['total_batch_size'], batch_per_gpu=train['total_batch_size'] // len(devices),
     epochs=cfg['epoches'], evaluation=dict(split='val', spatial_size=cfg['eval_spatial_size'],
                                          global_batch=cfg['val_dataloader']['total_batch_size'],
                                          postprocessor=cfg.get('PostProcessor', {})),
@@ -222,17 +229,18 @@ import sys
 def query(arguments):
     return list(csv.reader(io.StringIO(subprocess.check_output(['nvidia-smi', *arguments], text=True))))
 
+devices = {int(i) for i in os.environ['GPU_IDS'].split(',')}
 cards = query(['--query-gpu=index,uuid,memory.used,utilization.gpu', '--format=csv,noheader,nounits'])
 apps = query(['--query-compute-apps=gpu_uuid,pid,used_memory', '--format=csv,noheader,nounits'])
 active = {row[0].strip() for row in apps if row}
 state = [dict(index=int(i), uuid=u.strip(), memory_mib=int(m.strip()), utilization=int(v.strip()))
-         for i, u, m, v in cards if int(i) in (0, 1)]
-idle = len(state) == 2 and all(s['uuid'] not in active and s['memory_mib'] <= 256 and s['utilization'] == 0 for s in state)
-Path(os.environ['GATE']).write_text(json.dumps(dict(both_idle=idle, gpus=state, compute_apps=apps), indent=2), encoding='utf-8')
-print(json.dumps(dict(output=os.environ['OUT'], both_idle=idle, gpus=state)), flush=True)
+         for i, u, m, v in cards if int(i) in devices]
+idle = len(state) == len(devices) and all(s['uuid'] not in active and s['memory_mib'] <= 256 and s['utilization'] == 0 for s in state)
+Path(os.environ['GATE']).write_text(json.dumps(dict(all_idle=idle, gpus=state, compute_apps=apps), indent=2), encoding='utf-8')
+print(json.dumps(dict(output=os.environ['OUT'], all_idle=idle, gpus=state)), flush=True)
 if not idle:
     marker = 'NOT_STARTED.txt' if os.environ['MODE'] == 'new' else os.environ['ATTEMPT'] + '.NOT_STARTED.txt'
-    (Path(os.environ['OUT']) / marker).write_text('GPU 0 and GPU 1 were not simultaneously idle. No process launched.\n', encoding='utf-8')
+    (Path(os.environ['OUT']) / marker).write_text('GPUs ' + os.environ['GPU_IDS'] + ' were not simultaneously idle. No process launched.\n', encoding='utf-8')
     sys.exit(3)
 PY
 
@@ -244,7 +252,7 @@ import yaml
 
 cfg = yaml.safe_load((Path(os.environ['OUT']) / 'resolved_config.yml').read_text())
 arguments = [
-    'torchrun', '--standalone', '--nproc_per_node=2', 'train.py',
+    'torchrun', '--standalone', '--nproc_per_node=' + str(len(os.environ['GPU_IDS'].split(','))), 'train.py',
     '-c', str(Path(os.environ['OUT']) / 'resolved_config.yml'),
     '-t' if os.environ['MODE'] == 'new' else '-r', os.environ['INITIAL'],
     '--seed', str(cfg.get('seed', 0)), '--use-amp',
@@ -256,7 +264,7 @@ script = '\n'.join([
     'source ' + shlex.quote(str(Path(os.environ['CONDA_BASE']) / 'etc/profile.d/conda.sh')),
     'conda activate deim_zxy',
     'ulimit -Sn 65535',
-    'exec env CUDA_VISIBLE_DEVICES=0,1 PYTHONUNBUFFERED=1 ' + shlex.join(arguments), '',
+    'exec env CUDA_VISIBLE_DEVICES=' + os.environ['GPU_IDS'] + ' PYTHONUNBUFFERED=1 ' + shlex.join(arguments), '',
 ])
 Path(os.environ['COMMAND']).write_text(script, encoding='utf-8')
 PY
