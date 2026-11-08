@@ -1,0 +1,18 @@
+# E004 (E1): matching class-cost weight 2 -> 0.5 on the fixed 36-epoch E000 protocol. Nothing else changes:
+# MAL and every other loss weight stay as in E000. One matcher object serves every matching stage
+# (encoder Top-K, decoder-1 pre head, decoder layers 1-4), so all of them use the new weight.
+# See docs/sardet100k_matching_ablation.md.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_matching_ablation.md
+experiment_baseline_revision: 455b196
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_match_cls05_36e_b32/seed0
+
+DEIMCriterion:
+  # Logging only: matching statistics of each training batch (class 3 = tank). Losses are unchanged.
+  log_matching_stats: True
+  matching_stats_class: 3
+  matcher:
+    weight_dict:
+      cost_class: 0.5

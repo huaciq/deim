@@ -86,6 +86,8 @@ class DEIMCriterion(nn.Module):
         wfdr_weight=0.5,
         use_bccq=False,
         mal_edge_tolerance_px=0.,
+        log_matching_stats=False,
+        matching_stats_class=None,
         ):
         """Create the criterion.
         Parameters:
@@ -144,6 +146,10 @@ class DEIMCriterion(nn.Module):
         self.mal_edge_tolerance_px = float(mal_edge_tolerance_px)
         self.input_size = None
         self.bccq_metrics = {}
+        # Logging only: per-batch matching statistics of the actual training assignment (no gradients, no RNG).
+        self.log_matching_stats = bool(log_matching_stats)
+        self.matching_stats_class = None if matching_stats_class is None else int(matching_stats_class)
+        self.matching_metrics = {}
         if use_bccq and (use_sdcp or 'mal' not in losses or
                          not {'loss_bccq_type', 'loss_bccq_quality'}.issubset(weight_dict)):
             raise ValueError('BCCQ requires mal dispatch, explicit type/quality weights and no SDCP.')
@@ -244,6 +250,83 @@ class DEIMCriterion(nn.Module):
             type_loss = F.cross_entropy(types[idx], labels, reduction='sum') if labels.numel() else types.sum() * 0.
             quality_loss = F.binary_cross_entropy_with_logits(quality, target, weight=weight, reduction='sum')
         return {'loss_bccq_type': type_loss / num_boxes, 'loss_bccq_quality': quality_loss / num_boxes}
+
+    @torch.no_grad()
+    def _record_matching_metrics(self, outputs, targets, indices, cached_indices, cached_indices_enc, indices_go):
+        """Statistics of the assignment actually used in this training batch. Logging only.
+
+        Stages: encoder Top-K, decoder-1 pre head, decoder layers 1..L (the last is the main output).
+        Every value is a sum over the batch (all-reduced across ranks); dividing the epoch mean of a
+        sum by the epoch mean of its count gives an instance-weighted ratio. Keys ending in _tank are
+        restricted to GTs of matching_stats_class.
+          gt / union             counts of GTs and of (query, GT) pairs in the union set used by box losses
+          iou_<stage>, iou50_, iou75_   matched-query IoU (sum, and counts at >= .5 / >= .75)
+          same_dec_all           GTs matched to one query at every decoder layer
+          same_dec_<k>_<k+1>     GTs matched to the same query at consecutive decoder layers
+          boxpos_clsbg_dec<k>    union queries not matched at decoder layer k: box supervision but MAL background
+          clsbg_run2 / clsbg_all union queries that are background at >= 2 consecutive / all decoder layers
+        """
+        decoder = [ind for ind in cached_indices[:len(outputs['aux_outputs'])]] + [indices]
+        stages = [('enc', outputs['enc_aux_outputs'][0]['pred_boxes'], cached_indices_enc[0])] if cached_indices_enc else []
+        if 'pre_outputs' in outputs:
+            stages.append(('pre', outputs['pre_outputs']['pred_boxes'], cached_indices[-1]))
+        boxes = [aux['pred_boxes'] for aux in outputs['aux_outputs']] + [outputs['pred_boxes']]
+        stages += [(f'dec{k + 1}', boxes[k], decoder[k]) for k in range(len(decoder))]
+        suffixes = [''] if self.matching_stats_class is None else ['', '_tank']
+        names = []
+        for s in suffixes:
+            names += [f'gt{s}', f'union{s}', f'same_dec_all{s}', f'clsbg_run2{s}', f'clsbg_all{s}']
+            names += [f'same_dec_{k + 1}_{k + 2}{s}' for k in range(len(decoder) - 1)]
+            names += [f'boxpos_clsbg_dec{k + 1}{s}' for k in range(len(decoder))]
+            for stage, _, _ in stages:
+                names += [f'iou_{stage}{s}', f'iou50_{stage}{s}', f'iou75_{stage}{s}']
+        position = {name: n for n, name in enumerate(names)}
+        stats = outputs['pred_boxes'].new_zeros(len(names), dtype=torch.float32)
+
+        def add(name, masks, values):
+            for s, mask in zip(suffixes, masks):
+                stats[position[name + s]] += values[mask].float().sum() if torch.is_tensor(values) else float(values) * float(mask)
+
+        for b, target in enumerate(targets):
+            labels = target['labels']
+            count = len(labels)
+            if count == 0:
+                continue
+            groups = [torch.ones_like(labels, dtype=torch.bool)]
+            if self.matching_stats_class is not None:
+                groups.append(labels == self.matching_stats_class)
+            ones = torch.ones(count, device=labels.device)
+            add('gt', groups, ones)
+            gt_boxes = box_cxcywh_to_xyxy(target['boxes'].float())
+            query_of = {}
+            for stage, pred, ind in stages:
+                q = torch.full((count,), -1, dtype=torch.long, device=labels.device)
+                q[ind[b][1].to(labels.device)] = ind[b][0].to(labels.device)
+                query_of[stage] = q
+                iou = torch.diag(box_iou(box_cxcywh_to_xyxy(pred[b][q].float()), gt_boxes)[0])
+                add(f'iou_{stage}', groups, iou)
+                add(f'iou50_{stage}', groups, (iou >= .5).float())
+                add(f'iou75_{stage}', groups, (iou >= .75).float())
+            layers = [query_of[f'dec{k + 1}'] for k in range(len(decoder))]
+            same = torch.stack([layers[k] == layers[0] for k in range(len(layers))]).all(0)
+            add('same_dec_all', groups, same.float())
+            for k in range(len(layers) - 1):
+                add(f'same_dec_{k + 1}_{k + 2}', groups, (layers[k] == layers[k + 1]).float())
+            union_q, union_g = indices_go[b][0].to(labels.device), indices_go[b][1].to(labels.device)
+            union_groups = [torch.ones_like(union_q, dtype=torch.bool)]
+            if self.matching_stats_class is not None:
+                union_groups.append(labels[union_g] == self.matching_stats_class)
+            add('union', union_groups, torch.ones(len(union_q), device=labels.device))
+            background = torch.stack([~torch.isin(union_q, decoder[k][b][0].to(labels.device)) for k in range(len(decoder))])
+            for k in range(len(decoder)):
+                add(f'boxpos_clsbg_dec{k + 1}', union_groups, background[k].float())
+            run2 = (background[:-1] & background[1:]).any(0) if len(decoder) > 1 else background[0]
+            add('clsbg_run2', union_groups, run2.float())
+            add('clsbg_all', union_groups, background.all(0).float())
+        if is_dist_available_and_initialized():
+            torch.distributed.all_reduce(stats)
+        # One device-to-host copy per step; the training loop reads plain floats.
+        self.matching_metrics = {'match_' + name: value for name, value in zip(names, stats.tolist())}
 
     @torch.no_grad()
     def _record_bccq_metrics(self, outputs, targets, indices):
@@ -639,6 +722,8 @@ class DEIMCriterion(nn.Module):
                 cached_indices_enc.append(indices_enc)
                 indices_aux_list.append(indices_enc)
             indices_go = self._get_go_indices(indices, indices_aux_list)
+            if self.log_matching_stats:
+                self._record_matching_metrics(outputs, targets, indices, cached_indices, cached_indices_enc, indices_go)
 
             num_boxes_go = sum(len(x[0]) for x in indices_go)
             num_boxes_go = torch.as_tensor([num_boxes_go], dtype=torch.float, device=next(iter(outputs.values())).device)
