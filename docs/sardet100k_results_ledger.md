@@ -33,6 +33,8 @@
 | E000 | 基线 | 0 | 35 | 65.29 | — | 93.15 | 70.26 | 60.18 | 76.63 | 72.09 | 73.36 | 73.75 | 62.78 | 71.21 | 57.66 | 45.97 | 80.40 | 19.48M | 17:38 | 基线 |
 | E001 | M1 成像—标注几何解耦 | 0 | | | | | | | | | | | | | | | | | | 中止（第 2 轮后，用户决定不作为方法，无结论） |
 | E002 | GREA 保护环证据注意力 | 0 | | | | | | | | | | | | | | | | | | 筛选中 |
+| E000-old | 基线（旧服务器） | 0 | 35 | 65.15 | — | 93.22 | 69.97 | | | | | | | | | | | 19.48M | | 基线（旧服务器） |
+| E003 | Q-MAL 像素容差质量目标（旧服务器，τ=1.5） | 0 | | | | | | | | | | | | | | | | | | 待启动 |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -41,6 +43,7 @@
 | ID | 方法 | 种子 | 权重 | AP | AP50 | AP75 | APs | APm | APl | AR100 | ship | aircraft | car | tank | bridge | harbor |
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | E000 | 基线 | 0 | best_stg2 | 62.39 | 90.92 | 66.35 | 59.01 | 74.65 | 71.72 | 70.88 | 72.90 | 49.80 | 71.90 | 53.91 | 44.87 | 80.95 |
+| E000-old | 基线（旧服务器） | 0 | best_stg2 | 62.7 | 91.6 | 66.1 | 58.9 | 75.0 | 72.4 | 71.2 | | | | | | |
 
 ## 运行记录
 
@@ -49,6 +52,8 @@
 | E000 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml` | `455b196` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261105_125147_N2zAJh` |
 | E001 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32.yml` | `8e83207` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32_seed0_20261106_145049_1Gh5VI` |
 | E002 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml` | `10015d1` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_grea_36e_b32_seed0_20261106_161421_p4o6KB` |
+| E000-old | 旧服务器上补跑的 E000 协议（见运行目录 `resolved_config.yml`） | 未记录 | 旧服务器 `/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu` |
+| E003 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml` | `07e932b` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/`，待启动 |
 
 ## 备注
 
@@ -64,3 +69,7 @@
 ### E000 错误诊断
 
 见 [基线诊断](sardet100k_baseline_diagnosis.md)。
+
+### E000-old 旧服务器基线（2026-11-08）
+
+stg1 最佳为第 31 轮 val AP 63.88，stg2 最佳为第 35 轮 65.15，按实测 val AP 选 `best_stg2` 评估 test。test 只有 COCO 汇总输出（三位小数），六类 AP 尚未独立重算。与新服务器 E000 相比：val −0.14，test +0.3，均在单种子波动内。E003（Q-MAL）在旧服务器运行，只和 E000-old 作差。
