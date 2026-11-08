@@ -169,6 +169,48 @@ echo $! > $O/replay.pid; disown
 
 脚本会跳过 `report.json` 里已经算过的 checkpoint，所以可以在训练过程中反复运行。脚本本身及其依赖还没有提交到 Git，运行时用的是上面目录里的副本。
 
+## E1 自动诊断报告
+
+脚本 `tools/sardet100k/e1_report.py`，分三步。
+
+1. **`collect`：** 用一个运行自己的 EMA 权重和匹配器，对全部 val 做推理（默认 Decoder 末层和配置中的后处理），并在 OGSOD、MSAR 的 tank 图上保存各阶段输出、逐层匹配和并集。
+2. **`analyse`：** 生成第 1–6 节的统计。
+3. **`compare`：** 生成两个运行的变化表和图，在本地运行（服务器环境没有 matplotlib）。
+
+| 节 | 内容 |
+| --- | --- |
+| 1 总体 | 最佳轮的 AP、AP50、AP75、APs、APm、APl、AR1、AR10、AR100（训练日志），并用本脚本重算一次 |
+| 2 来源 × 类别 | ogsod、msar、other_256、other_512、other_800 等分组，各类 AP / AP50 / AP75 / AR |
+| 3 匹配质量 | 各阶段（enc、pre、dec1–4）匹配 query 的 IoU，是否选中最佳框，层间换 query 的比例，匹配对的分类、L1、GIoU 代价（未乘权重） |
+| 4 Query 竞争 | 每个 tank GT 排名第一的 query 的 A/B/C/D 比例，被另一 query 超过 ≥ .05 IoU 的比例，分数差和 IoU 差 |
+| 5 跨层监督 | “框为正、分类为背景”的 query 数和持续层数（与训练日志同一函数）；可附 EMA 重放曲线（`--dynamics`）和训练 batch 统计（`--train-log`） |
+| 6 Decoder 逐层 | 各阶段分类 logit 与 IoU 的 Spearman（按图 bootstrap 区间），IoU、分数水平，层间变化相关，LQE 在末层的占比 |
+
+**口径一致性：**
+
+- **权重和匹配器：** 每个运行只用自己的权重和匹配器，不沿用别的运行的离线结果。checkpoint 默认选 `log.txt` 中 val AP 最高的那一轮所保存的文件。
+- **共享规则：** 两个运行使用同一批 val 图、同一 GT 关联规则（每个 query 归属于它在任一阶段重叠最多的 tank GT，候选为任一阶段 IoU ≥ .1 的 query，只确定一次）、同样的候选数（Decoder 300 个 query，后处理前 300）和同一段代码。
+
+E000 已在 CPU 上运行，输出在 E000 的 `independent_verify_20261106/report_E000/`。
+
+E1 训练结束后运行（GPU 4、5 空闲时用一张卡；输出目录必须直接放在 E000 的 `independent_verify_20261106/` 下）：
+
+```bash
+cd /root/zxy/deim && export PATH=/opt/miniconda3/bin:$PATH && source /opt/miniconda3/etc/profile.d/conda.sh && conda activate deim_zxy
+E0=/root/zxy/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261105_125147_N2zAJh
+V=$E0/independent_verify_20261106; C=$V/report_E000/code
+E1=$(ls -dt /root/zxy/experiments/deim_m_sardet100k_*match_cls05_36e_b32_seed0_20261108_195504* | head -n 1)
+O=$V/report_E004; mkdir -p $O
+CUDA_VISIBLE_DEVICES=4 PYTHONPATH=$PWD python $C/e1_report.py collect $E1 $O --device cuda:0
+PYTHONPATH=$PWD python $C/e1_report.py analyse $O --dynamics $V/matching_dynamics_E004 --train-log
+```
+
+本地生成对照（把两个 `report.json` 拷到本地后）：
+
+```bash
+python tools/sardet100k/e1_report.py compare <E000 报告目录> <E004 报告目录> --out analysis_outputs/e1_report --labels E000 E1
+```
+
 ## 结果
 
 待训练完成后填写。
