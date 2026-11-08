@@ -13,6 +13,7 @@ DEIMCriterion:
   # Logging only: matching statistics of each training batch (class 3 = tank). Losses are unchanged.
   log_matching_stats: True
   matching_stats_class: 3
+  matching_stats_interval: 10
   matcher:
     weight_dict:
       cost_class: 0.5

@@ -72,6 +72,16 @@ class MatchingStatsTest(unittest.TestCase):
             self.assertAlmostEqual(m['match_' + name], value, places=5, msg=name)
         self.assertTrue(all(isinstance(v, float) for v in m.values()))
 
+    def test_interval_samples_calls(self):
+        c = DEIMCriterion(HungarianMatcher(dict(cost_class=2, cost_bbox=5, cost_giou=2), use_focal_loss=True),
+                          dict(loss_mal=1, loss_bbox=5, loss_giou=2), ['mal', 'boxes'], num_classes=3, gamma=1.5,
+                          log_matching_stats=True, matching_stats_class=1, matching_stats_interval=3)
+        recorded = []
+        for _ in range(7):
+            c(outputs(), TARGETS)
+            recorded.append(bool(c.matching_metrics))
+        self.assertEqual(recorded, [True, False, False, True, False, False, True])
+
     def test_e1_config(self):
         cfg = load_config(str(ROOT / 'configs/deim_dfine/deim_hgnetv2_m_sardet100k_match_cls05_36e_b32.yml'))
         base = load_config(str(ROOT / 'configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml'))
@@ -79,6 +89,7 @@ class MatchingStatsTest(unittest.TestCase):
         self.assertEqual(cfg['DEIMCriterion']['weight_dict'], base['DEIMCriterion']['weight_dict'])
         self.assertTrue(cfg['DEIMCriterion']['log_matching_stats'])
         self.assertEqual(cfg['DEIMCriterion']['matching_stats_class'], 3)
+        self.assertEqual(cfg['DEIMCriterion']['matching_stats_interval'], 10)
 
 
 if __name__ == '__main__':

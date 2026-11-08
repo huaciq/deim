@@ -88,6 +88,7 @@ class DEIMCriterion(nn.Module):
         mal_edge_tolerance_px=0.,
         log_matching_stats=False,
         matching_stats_class=None,
+        matching_stats_interval=1,
         ):
         """Create the criterion.
         Parameters:
@@ -149,6 +150,9 @@ class DEIMCriterion(nn.Module):
         # Logging only: per-batch matching statistics of the actual training assignment (no gradients, no RNG).
         self.log_matching_stats = bool(log_matching_stats)
         self.matching_stats_class = None if matching_stats_class is None else int(matching_stats_class)
+        # Record every Nth criterion call; other calls leave matching_metrics empty, so epoch means cover sampled steps only.
+        self.matching_stats_interval = max(1, int(matching_stats_interval))
+        self._matching_calls = 0
         self.matching_metrics = {}
         if use_bccq and (use_sdcp or 'mal' not in losses or
                          not {'loss_bccq_type', 'loss_bccq_quality'}.issubset(weight_dict)):
@@ -723,7 +727,11 @@ class DEIMCriterion(nn.Module):
                 indices_aux_list.append(indices_enc)
             indices_go = self._get_go_indices(indices, indices_aux_list)
             if self.log_matching_stats:
-                self._record_matching_metrics(outputs, targets, indices, cached_indices, cached_indices_enc, indices_go)
+                if self._matching_calls % self.matching_stats_interval == 0:
+                    self._record_matching_metrics(outputs, targets, indices, cached_indices, cached_indices_enc, indices_go)
+                else:
+                    self.matching_metrics = {}
+                self._matching_calls += 1
 
             num_boxes_go = sum(len(x[0]) for x in indices_go)
             num_boxes_go = torch.as_tensor([num_boxes_go], dtype=torch.float, device=next(iter(outputs.values())).device)

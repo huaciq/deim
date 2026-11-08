@@ -27,7 +27,8 @@
 
 E004 打开了 `log_matching_stats: True`、`matching_stats_class: 3`（tank）。
 
-- **统计内容：** criterion 在每个训练 batch 记录真实分配的统计，写入 `log.txt`（键名前缀 `train_match_`，为每轮的平均值）和 TensorBoard（`Module/match_*`）。
+- **采样：** `matching_stats_interval: 10`，每 10 步记录一次（每轮约 295 个 batch）。每步都记录时训练从约 0.55 s/步慢到 0.74 s/步，所以那次运行在第 0 轮内停止，目录 `..._match_cls05_36e_b32_seed0_20261108_194743_9I6Jlh` 留作记录，内有 `STOPPED.txt`。
+- **统计内容：** criterion 在被采样的训练 batch 上记录真实分配的统计，写入 `log.txt`（键名前缀 `train_match_`，为每轮的平均值）和 TensorBoard（`Module/match_*`）。
 - **不影响训练：** 统计在无梯度下计算，不消耗随机数，不进入损失；测试 `tests/test_matching_stats.py` 确认开关打开与关闭时，各项损失逐项相同。
 - **对照：** E000 没有这项记录，所以训练中的变化只能和 EMA 重放的结果对照；要直接比较，需要带记录重跑基线。
 
