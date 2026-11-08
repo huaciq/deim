@@ -26,6 +26,28 @@ from ..misc.dist_utils import get_world_size, is_dist_available_and_initialized
 from ..core import register
 
 
+def edge_tolerant_iou(src_boxes, target_boxes, tolerance_px, input_size):
+    """Paired IoU after forgiving up to `tolerance_px` input pixels of error on each edge.
+
+    Boxes are normalized cxcywh; input_size is (H, W) of the batch tensor. Each predicted edge
+    moves toward its target edge by min(|error|, tolerance), so edges within the tolerance count
+    as exact. Large boxes are barely affected; boxes near the pixel limit are no longer scored
+    low only for being small.
+    """
+    source = box_cxcywh_to_xyxy(src_boxes.float())
+    target = box_cxcywh_to_xyxy(target_boxes.float())
+    height, width = float(input_size[0]), float(input_size[1])
+    epsilon = source.new_tensor([tolerance_px / width, tolerance_px / height] * 2)
+    error = source - target
+    source = source - error.sign() * torch.minimum(error.abs(), epsilon)
+    lt = torch.maximum(source[:, :2], target[:, :2])
+    rb = torch.minimum(source[:, 2:], target[:, 2:])
+    inter = (rb - lt).clamp(min=0).prod(-1)
+    area_s = (source[:, 2:] - source[:, :2]).clamp(min=0).prod(-1)
+    area_t = (target[:, 2:] - target[:, :2]).clamp(min=0).prod(-1)
+    return inter / (area_s + area_t - inter).clamp(min=1e-12)
+
+
 @register()
 class DEIMCriterion(nn.Module):
     """ This class computes the loss for DEIM.
@@ -63,6 +85,7 @@ class DEIMCriterion(nn.Module):
         use_wfdr=False,
         wfdr_weight=0.5,
         use_bccq=False,
+        mal_edge_tolerance_px=0.,
         ):
         """Create the criterion.
         Parameters:
@@ -114,6 +137,12 @@ class DEIMCriterion(nn.Module):
             raise ValueError('W-FDR requires an explicit loss_wfdr entry in weight_dict (normally loss_fgl weight).')
         self.wfdr_loss = WassersteinFDRLoss(reg_max, wfdr_weight) if use_wfdr else None
         self.use_bccq = use_bccq
+        # Q-MAL: forgive this many input pixels of error per box edge before the MAL quality target.
+        # 0 keeps the original IoU target exactly.
+        if mal_edge_tolerance_px < 0:
+            raise ValueError('mal_edge_tolerance_px must be nonnegative.')
+        self.mal_edge_tolerance_px = float(mal_edge_tolerance_px)
+        self.input_size = None
         self.bccq_metrics = {}
         if use_bccq and (use_sdcp or 'mal' not in losses or
                          not {'loss_bccq_type', 'loss_bccq_quality'}.issubset(weight_dict)):
@@ -329,7 +358,13 @@ class DEIMCriterion(nn.Module):
     def loss_labels_mal(self, outputs, targets, indices, num_boxes, values=None):
         assert 'pred_boxes' in outputs
         idx = self._get_src_permutation_idx(indices)
-        if values is None:
+        if self.mal_edge_tolerance_px > 0:
+            if values is not None:
+                raise ValueError('Q-MAL computes its own quality target; boxes_weight_format must be None.')
+            src_boxes = outputs['pred_boxes'][idx]
+            target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+            ious = edge_tolerant_iou(src_boxes, target_boxes, self.mal_edge_tolerance_px, self.input_size).detach()
+        elif values is None:
             src_boxes = outputs['pred_boxes'][idx]
             target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
             ious, _ = box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
@@ -564,6 +599,10 @@ class DEIMCriterion(nn.Module):
              targets: list of dicts, such that len(targets) == batch_size.
                       The expected keys in each dict depends on the losses applied, see each loss' doc
         """
+        # Batch input (H, W) from the training loop; only Q-MAL needs it.
+        self.input_size = kwargs.pop('input_size', None)
+        if self.mal_edge_tolerance_px > 0 and self.input_size is None:
+            raise ValueError('Q-MAL needs the batch input_size (H, W) from the training loop.')
         if self.use_sdcp:
             # All GT-supervised box/FGL branches use the actual batch input size.
             image_size = outputs['sdcp_image_size']
