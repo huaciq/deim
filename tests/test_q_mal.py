@@ -109,7 +109,7 @@ class CriterionRoutingTest(unittest.TestCase):
     def test_config_enables_only_q_mal(self):
         cfg = load_config(str(CONFIG))
         base = load_config(str(ROOT / 'configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml'))
-        self.assertEqual(cfg['DEIMCriterion']['mal_edge_tolerance_px'], 1.0)
+        self.assertEqual(cfg['DEIMCriterion']['mal_edge_tolerance_px'], 1.5)
         self.assertNotIn('mal_edge_tolerance_px', base['DEIMCriterion'])
         self.assertIsNone(cfg['DEIMCriterion'].get('boxes_weight_format'))
         for key in ('epoches', 'flat_epoch', 'no_aug_epoch', 'seed', 'train_dataloader', 'val_dataloader', 'optimizer'):

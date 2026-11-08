@@ -1,5 +1,6 @@
 # E003 Q-MAL on the fixed 36-epoch E000 protocol. Only the MAL quality target differs:
-# each box edge is forgiven 1 input pixel of error before IoU^gamma. See docs/sardet100k_mosaic_seam_audit.md.
+# each box edge is forgiven 1.5 input pixels of error before IoU^gamma (about one annotation pixel
+# of a 512 image at 640; chosen by the zero-training target check). See docs/sardet100k_mosaic_seam_audit.md.
 __include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
 
 experiment_protocol_document: docs/sardet100k_mosaic_seam_audit.md
@@ -8,4 +9,4 @@ experiment_baseline_revision: 455b196
 output_dir: /root/zxy/experiments/deim_m_sardet100k_qmal_36e_b32/seed0
 
 DEIMCriterion:
-  mal_edge_tolerance_px: 1.0
+  mal_edge_tolerance_px: 1.5
