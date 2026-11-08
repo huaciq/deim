@@ -1,0 +1,13 @@
+# E004 (E1): matching class-cost weight 2 -> 1 on the fixed 36-epoch E000 protocol. Nothing else changes.
+# See docs/sardet100k_matching_ablation.md.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_matching_ablation.md
+experiment_baseline_revision: 455b196
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_match_cls1_36e_b32/seed0
+
+DEIMCriterion:
+  matcher:
+    weight_dict:
+      cost_class: 1

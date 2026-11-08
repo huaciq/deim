@@ -1,0 +1,14 @@
+# E006 (E3): E004 and E005 together: matching class-cost weight 1 and per-layer box supervision.
+# See docs/sardet100k_matching_ablation.md.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_matching_ablation.md
+experiment_baseline_revision: 455b196
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_match_cls1_layer_box_36e_b32/seed0
+
+DEIMCriterion:
+  use_uni_set: False
+  matcher:
+    weight_dict:
+      cost_class: 1
