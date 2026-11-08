@@ -128,8 +128,8 @@ class CriterionRoutingTest(unittest.TestCase):
                          ('deim_hgnetv2_m_sardet100k_qmal_36e_b32.yml', 'deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml')]:
             a, b = load_config(str(folder / new)), load_config(str(folder / old))
             self.assertEqual(strip(a), strip(b), old)
-            self.assertTrue(b['train_dataloader']['dataset']['ann_file'].startswith('/home/zxy/sar/datasets/'))
-            self.assertTrue(b['output_dir'].startswith('/home/zxy/sar/experiments/'))
+            self.assertTrue(b['train_dataloader']['dataset']['ann_file'].startswith('/data2/zxy/sar/datasets/SARDet_100K/'))
+            self.assertTrue(b['output_dir'].startswith('/data2/zxy/sar/experiments/'))
 
 
 if __name__ == '__main__':

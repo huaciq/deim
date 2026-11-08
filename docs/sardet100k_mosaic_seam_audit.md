@@ -132,7 +132,7 @@ SDCP、BCCQ、MPQ、GREA 的已有测试（41 项）仍通过。SDCP 曾对框�
 ### E003 改在旧服务器运行（2026-11-08）
 
 8 卡服务器另有安排，E003 放到旧服务器（GPU 0、1）。E000 是在新服务器上跑的，而 SAR-AIRcraft 上同一基线两台服务器相差约 0.4 AP，
-与 0.5 的晋级门槛同一量级。所以旧服务器上先跑 Q-MAL，再用同一协议补跑一次基线（E000b），E003 只和 E000b 比较。
-配置：`deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml`、`deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml`，
-与新服务器版本相比只改数据路径和输出目录（`tests/test_q_mal.py` 检查）。数据路径按旧服务器约定写为
-`/home/zxy/sar/datasets/SARDet_100K`，启动前需要确认。
+与 0.5 的晋级门槛同一量级。所以 E003 只和旧服务器上同协议的基线比较。该基线用户已补跑：
+`/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu`。
+配置：`deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml`（以及同协议的 `..._36e_b32_nozoom_nocrop_old_server.yml`），
+与新服务器版本相比只改数据路径（`/data2/zxy/sar/datasets/SARDet_100K`）和输出目录（`tests/test_q_mal.py` 检查）。
