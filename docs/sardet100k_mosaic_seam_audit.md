@@ -128,3 +128,11 @@ SDCP、BCCQ、MPQ、GREA 的已有测试（41 项）仍通过。SDCP 曾对框�
 
 局限：容差按输入像素定义。Mosaic 和多尺度训练会改变每个目标的“原图像素/输入像素”比例，固定 τ 只是折中；
 按目标携带原图尺度的版本更严格，但要改数据管线，先不做。
+
+### E003 改在旧服务器运行（2026-11-08）
+
+8 卡服务器另有安排，E003 放到旧服务器（GPU 0、1）。E000 是在新服务器上跑的，而 SAR-AIRcraft 上同一基线两台服务器相差约 0.4 AP，
+与 0.5 的晋级门槛同一量级。所以旧服务器上先跑 Q-MAL，再用同一协议补跑一次基线（E000b），E003 只和 E000b 比较。
+配置：`deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml`、`deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml`，
+与新服务器版本相比只改数据路径和输出目录（`tests/test_q_mal.py` 检查）。数据路径按旧服务器约定写为
+`/home/zxy/sar/datasets/SARDet_100K`，启动前需要确认。

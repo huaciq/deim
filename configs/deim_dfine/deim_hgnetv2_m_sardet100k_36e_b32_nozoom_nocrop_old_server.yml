@@ -1,0 +1,15 @@
+# E000 protocol on the old server: only dataset paths and output directory differ from the new-server config.
+# Used as the same-server baseline for old-server SARDet-100K runs (E003b).
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+output_dir: /home/zxy/sar/experiments/deim_m_sardet100k_36e_b32_nozoom_nocrop_old_server/seed0
+
+train_dataloader:
+  dataset:
+    img_folder: /home/zxy/sar/datasets/SARDet_100K/JPEGImages/train
+    ann_file: /home/zxy/sar/datasets/SARDet_100K/Annotations/train.json
+
+val_dataloader:
+  dataset:
+    img_folder: /home/zxy/sar/datasets/SARDet_100K/JPEGImages/val
+    ann_file: /home/zxy/sar/datasets/SARDet_100K/Annotations/val.json

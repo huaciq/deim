@@ -1,0 +1,11 @@
+# E003 Q-MAL on the old server: the old-server E000 protocol plus the Q-MAL switch, nothing else.
+# Same setting as deim_hgnetv2_m_sardet100k_qmal_36e_b32.yml; see docs/sardet100k_mosaic_seam_audit.md.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml']
+
+experiment_protocol_document: docs/sardet100k_mosaic_seam_audit.md
+experiment_baseline_revision: 455b196
+
+output_dir: /home/zxy/sar/experiments/deim_m_sardet100k_qmal_36e_b32_old_server/seed0
+
+DEIMCriterion:
+  mal_edge_tolerance_px: 1.5

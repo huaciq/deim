@@ -116,6 +116,21 @@ class CriterionRoutingTest(unittest.TestCase):
             self.assertEqual(cfg[key], base[key], key)
         self.assertNotEqual(cfg['output_dir'], base['output_dir'])
 
+    def test_old_server_configs_differ_only_in_paths(self):
+        def strip(cfg):
+            cfg = {k: v for k, v in cfg.items() if k not in ('output_dir', '__include__')}
+            for loader in ('train_dataloader', 'val_dataloader'):
+                cfg[loader] = dict(cfg[loader], dataset={k: v for k, v in cfg[loader]['dataset'].items()
+                                                         if k not in ('img_folder', 'ann_file')})
+            return cfg
+        folder = ROOT / 'configs/deim_dfine'
+        for new, old in [('deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml', 'deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml'),
+                         ('deim_hgnetv2_m_sardet100k_qmal_36e_b32.yml', 'deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml')]:
+            a, b = load_config(str(folder / new)), load_config(str(folder / old))
+            self.assertEqual(strip(a), strip(b), old)
+            self.assertTrue(b['train_dataloader']['dataset']['ann_file'].startswith('/home/zxy/sar/datasets/'))
+            self.assertTrue(b['output_dir'].startswith('/home/zxy/sar/experiments/'))
+
 
 if __name__ == '__main__':
     unittest.main()
