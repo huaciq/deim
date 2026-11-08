@@ -126,6 +126,49 @@ kill $(cat "$OUT/launcher.pid"); sleep 5; kill $(ps -eo pid,args | grep train.py
 cd /root/zxy/deim && GPU_IDS=4,5 bash tools/run_sar_module_experiment.sh --resume "$OUT"
 ```
 
+## EMA 重放：训练过程中的匹配变化
+
+脚本 `tools/sardet100k/tank_matching_dynamics.py`：对一个运行的每个 checkpoint（每 4 轮一个，外加 `final.pth`），用 EMA 权重在固定的 OGSOD、MSAR val tank 图上重放该运行自己的匹配器。统计直接调用 `DEIMCriterion._record_matching_metrics`，与训练日志的定义完全相同。在 CPU 上运行，每个 checkpoint 约 2 分钟。
+
+**口径说明：** 每个 Decoder 层恰好匹配 GT 数个 query，而它们都在并集里，所以“框为正、分类为背景”的数量在每一层都等于“并集大小 − GT 数”，逐层相同。下表因此用“每个 GT 多出的并集 query 数”来表示这类 query，用“连续 ≥ 2 层 / 全部 4 层为背景”来表示它们持续多久。
+
+### E000 基线（OGSOD tank 1,216 个 GT；MSAR tank 522 个）
+
+| 轮 | OGSOD 匹配 IoU（dec4 均值 / ≥ .75） | OGSOD 4 层同一 query | dec1→dec2 / dec2→dec3 / dec3→dec4 同一 query | OGSOD 每 GT 多出的框正分类背景 query | 连续 ≥ 2 层背景 / 全部 4 层背景（占并集） | MSAR 匹配 IoU | MSAR 4 层同一 query | MSAR 每 GT 多出 |
+|---:|---|---:|---|---:|---|---:|---:|---:|
+| 3 | .498 / .139 | .822 | .880 / .918 / .935 | .260 | .221 / .085 | .857 | .994 | .010 |
+| 7 | .512 / .151 | .844 | .887 / .930 / .964 | .242 | .211 / .092 | .864 | .996 | .008 |
+| 11 | .535 / .187 | .852 | .892 / .918 / .975 | .229 | .204 / .088 | .868 | .996 | .004 |
+| 15 | .555 / .214 | .851 | .895 / .924 / .963 | .257 | .224 / .097 | .875 | .998 | .002 |
+| 19 | .570 / .226 | .819 | .878 / .921 / .961 | .278 | .240 / .089 | .882 | 1.000 | .002 |
+| 23 | .601 / .257 | .798 | .841 / .924 / .963 | .347 | .277 / .112 | .902 | .998 | .002 |
+| 27 | .629 / .286 | .813 | .856 / .927 / .969 | .336 | .275 / .116 | .926 | .998 | .006 |
+| 31 | .641 / .318 | .834 | .864 / .945 / .972 | .316 | .254 / .116 | .944 | .998 | .008 |
+| 35 | .645 / .317 | .836 | .877 / .932 / .969 | .294 | .246 / .106 | .957 | .998 | .004 |
+
+读法：
+
+- **OGSOD 层间不一致的位置与大小：** 匹配在各层间换 query 的情况主要发生在 Decoder 1→2，同一 query 的比例只有 .84–.89。“框为正、分类为背景”的 query 每个 GT 多出 .23–.35 个，在第 23 轮附近最多；第 20 轮正是 Mosaic/MixUp 结束、学习率开始下降的时候。
+- **MSAR 几乎没有这个现象。**
+- **第 19–27 轮，后几层匹配到的框反而不如 Decoder 1：** 匹配 IoU 均值 dec1 > dec4，例如第 23 轮为 .606 对 .601，与“后层按分类重新选择”一致；到第 35 轮又略有回升。
+- **E004 若机制成立，应看到：** OGSOD 的 4 层同一 query 比例上升，每 GT 多出的并集 query 减少，匹配 IoU 与 IoU ≥ .75 的比例上升；MSAR 基本不变。
+
+结果在 E000 运行目录的 `independent_verify_20261106/matching_dynamics_E000/report.json`。
+
+E004 的重放（checkpoint 生成后运行；输出目录必须直接放在 E000 的 `independent_verify_20261106/` 下，脚本从那里读取来源分组）：
+
+```bash
+cd /root/zxy/deim && export PATH=/opt/miniconda3/bin:$PATH && source /opt/miniconda3/etc/profile.d/conda.sh && conda activate deim_zxy
+E0=/root/zxy/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261105_125147_N2zAJh
+C=$E0/independent_verify_20261106/matching_dynamics_E000/code
+OUT=$(ls -dt /root/zxy/experiments/deim_m_sardet100k_*match_cls05* | head -n 1)
+O=$E0/independent_verify_20261106/matching_dynamics_E004
+mkdir -p $O && CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=16 PYTHONPATH=$PWD nohup nice -n 10 python $C/tank_matching_dynamics.py $OUT $O --device cpu > $O/replay.log 2>&1 < /dev/null &
+echo $! > $O/replay.pid; disown
+```
+
+脚本会跳过 `report.json` 里已经算过的 checkpoint，所以可以在训练过程中反复运行。脚本本身及其依赖还没有提交到 Git，运行时用的是上面目录里的副本。
+
 ## 结果
 
 待训练完成后填写。
