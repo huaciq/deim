@@ -142,3 +142,11 @@ SDCP、BCCQ、MPQ、GREA 的已有测试（41 项）仍通过。SDCP 曾对框�
 旧服务器 36 轮，按 val 选 `best_stg2`。对同服务器基线 E000-old：val AP 64.51（−0.64）、AP50 +0.82、AP75 −0.70；test AP 61.4（−1.3）、APs −1.5。
 未过 +0.5 门槛，按实验卡淘汰。放宽目标让多数准框的目标分饱和，丢掉了“准”与“很准”之间的排序信息，高 IoU 下的 AP 损失大于小目标可能的收益，
 而小目标 AP 本身也下降。结论：上文“MAL 把尺寸当成定位差”的相关性存在，但不是 AP 损失的原因；严格 IoU 目标对排序有用。数字见结果总表。
+
+### E007：同时去掉 MAL 与 Dense O2O（2026-11-09，待运行）
+
+问题：DEIM 的两个机制合起来对 SAR 是有益还是有害。按用户决定只跑一个合并对照，不拆成两个单项。
+配置 `deim_hgnetv2_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server.yml`，在 E000-old 上只改：Mosaic 概率 0.5→0、MixUp 概率 0.5→0、
+分类损失 MAL→D-FINE 的 VFL（alpha 0.75、gamma 2.0）。初始化仍是 DEIM COCO 权重，学习率日程、激活、BN、EMA、AMP、其余增强与日程都不变
+（`tests/test_no_mal_no_dense_o2o_config.py` 检查只有这几项不同）。不使用 D-FINE obj2coco 权重，避免 Objects365 预训练混入比较。
+判读：val AP 明显低于 E000-old（65.15）说明两者合起来在 SAR 上有益；持平或更高说明无益甚至有害。单个机制各自的作用这一实验不能区分。

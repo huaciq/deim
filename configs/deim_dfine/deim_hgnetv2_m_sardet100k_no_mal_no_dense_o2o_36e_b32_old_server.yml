@@ -1,0 +1,22 @@
+# E007: remove both DEIM mechanisms from the old-server 36-epoch E000 protocol, everything else unchanged.
+# - Dense O2O off: no Mosaic (mosaic_prob 0) and no MixUp (mixup_prob 0); the other augmentations keep their schedule.
+# - MAL off: D-FINE's VFL classification loss (alpha 0.75, gamma 2.0 as in the D-FINE base config).
+# Same DEIM COCO initialization, LR schedule, activation, BN, EMA and AMP as E000-old.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml']
+
+experiment_protocol_document: docs/sardet100k_mosaic_seam_audit.md
+
+output_dir: /data2/zxy/sar/experiments/deim_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server/seed0
+
+train_dataloader:
+  dataset:
+    transforms:
+      mosaic_prob: 0.
+  collate_fn:
+    mixup_prob: 0.
+
+DEIMCriterion:
+  weight_dict: {loss_vfl: 1, loss_bbox: 5, loss_giou: 2, loss_fgl: 0.15, loss_ddf: 1.5}
+  losses: ['vfl', 'boxes', 'local']
+  alpha: 0.75
+  gamma: 2.0

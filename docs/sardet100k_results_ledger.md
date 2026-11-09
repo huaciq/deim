@@ -35,6 +35,7 @@
 | E002 | GREA 保护环证据注意力 | 0 | | | | | | | | | | | | | | | | | | 筛选中 |
 | E000-old | 基线（旧服务器） | 0 | 35 | 65.15 | — | 93.22 | 69.97 | | | | | | | | | | | 19.48M | | 基线（旧服务器） |
 | E003 | Q-MAL 像素容差质量目标（旧服务器，τ=1.5） | 0 | 35 | 64.51 | −0.64 | 94.04 | 69.27 | | | | | | | | | | | 19.48M | | 淘汰（对照 E000-old） |
+| E007 | 去掉 MAL 与 Dense O2O（VFL，无 Mosaic/MixUp；旧服务器） | 0 | | | | | | | | | | | | | | | | 19.48M | | 待启动（对照 E000-old） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -55,6 +56,7 @@
 | E002 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml` | `10015d1` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_grea_36e_b32_seed0_20261106_161421_p4o6KB` |
 | E000-old | 旧服务器上补跑的 E000 协议（见运行目录 `resolved_config.yml`） | 未记录 | 旧服务器 `/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu` |
 | E003 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml` | `07e932b` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*qmal*`，已完成 |
+| E007 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server.yml` | 见启动目录 `start_command.sh` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*no_mal_no_dense_o2o*`，待启动 |
 
 ## 备注
 
