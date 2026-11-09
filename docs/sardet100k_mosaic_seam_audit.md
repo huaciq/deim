@@ -150,3 +150,13 @@ SDCP、BCCQ、MPQ、GREA 的已有测试（41 项）仍通过。SDCP 曾对框�
 分类损失 MAL→D-FINE 的 VFL（alpha 0.75、gamma 2.0）。初始化仍是 DEIM COCO 权重，学习率日程、激活、BN、EMA、AMP、其余增强与日程都不变
 （`tests/test_no_mal_no_dense_o2o_config.py` 检查只有这几项不同）。不使用 D-FINE obj2coco 权重，避免 Objects365 预训练混入比较。
 判读：val AP 明显低于 E000-old（65.15）说明两者合起来在 SAR 上有益；持平或更高说明无益甚至有害。单个机制各自的作用这一实验不能区分。
+
+### E003 事后分析：Q-MAL 在 val 上把 AP 丢在哪里（2026-11-09，待运行）
+
+脚本 `tools/sardet100k/qmal_ranking_analysis.py`，对 E000-old 与 E003 的 `best_stg2` 各做一次 val 推理（EMA 权重、各自的 `resolved_config.yml`），
+按 COCO bbox 规则自行匹配（每图每类前 100、忽略 GT 最后匹配、101 个召回点；合成数据上与 pycocotools 的 AP、AP50、AP75 一致）。
+"小目标"指 GT 原图长边 < 16 px。回答三个问题：
+1. 固定类别和实际 IoU 区间后，小目标是否仍有额外低分（<16 px 与 ≥32 px 的分数中位数差）。
+2. IoU 0.5、0.75、0.9 下，每个合格框前面平均排着多少不合格框，按重复框、定位不足（0.1≤IoU<t）、背景分开。
+3. <16 px 目标的 AP 损失拆成"没有合格框"（100 − 理想排序 AP）和"有合格框但排序靠后"（理想排序 AP − AP）。
+只用于解释 E003 的失败，不改变淘汰结论。
