@@ -136,3 +136,9 @@ SDCP、BCCQ、MPQ、GREA 的已有测试（41 项）仍通过。SDCP 曾对框�
 `/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu`。
 配置：`deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml`（以及同协议的 `..._36e_b32_nozoom_nocrop_old_server.yml`），
 与新服务器版本相比只改数据路径（`/data2/zxy/sar/datasets/SARDet_100K`）和输出目录（`tests/test_q_mal.py` 检查）。
+
+### E003 结果：Q-MAL 淘汰（2026-11-09）
+
+旧服务器 36 轮，按 val 选 `best_stg2`。对同服务器基线 E000-old：val AP 64.51（−0.64）、AP50 +0.82、AP75 −0.70；test AP 61.4（−1.3）、APs −1.5。
+未过 +0.5 门槛，按实验卡淘汰。放宽目标让多数准框的目标分饱和，丢掉了“准”与“很准”之间的排序信息，高 IoU 下的 AP 损失大于小目标可能的收益，
+而小目标 AP 本身也下降。结论：上文“MAL 把尺寸当成定位差”的相关性存在，但不是 AP 损失的原因；严格 IoU 目标对排序有用。数字见结果总表。

@@ -34,7 +34,7 @@
 | E001 | M1 成像—标注几何解耦 | 0 | | | | | | | | | | | | | | | | | | 中止（第 2 轮后，用户决定不作为方法，无结论） |
 | E002 | GREA 保护环证据注意力 | 0 | | | | | | | | | | | | | | | | | | 筛选中 |
 | E000-old | 基线（旧服务器） | 0 | 35 | 65.15 | — | 93.22 | 69.97 | | | | | | | | | | | 19.48M | | 基线（旧服务器） |
-| E003 | Q-MAL 像素容差质量目标（旧服务器，τ=1.5） | 0 | | | | | | | | | | | | | | | | | | 待启动 |
+| E003 | Q-MAL 像素容差质量目标（旧服务器，τ=1.5） | 0 | 35 | 64.51 | −0.64 | 94.04 | 69.27 | | | | | | | | | | | 19.48M | | 淘汰（对照 E000-old） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -44,6 +44,7 @@
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | E000 | 基线 | 0 | best_stg2 | 62.39 | 90.92 | 66.35 | 59.01 | 74.65 | 71.72 | 70.88 | 72.90 | 49.80 | 71.90 | 53.91 | 44.87 | 80.95 |
 | E000-old | 基线（旧服务器） | 0 | best_stg2 | 62.7 | 91.6 | 66.1 | 58.9 | 75.0 | 72.4 | 71.2 | | | | | | |
+| E003 | Q-MAL（旧服务器，τ=1.5） | 0 | best_stg2 | 61.4 | 91.5 | 65.3 | 57.4 | 73.0 | 71.2 | 69.6 | | | | | | |
 
 ## 运行记录
 
@@ -53,7 +54,7 @@
 | E001 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32.yml` | `8e83207` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32_seed0_20261106_145049_1Gh5VI` |
 | E002 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml` | `10015d1` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_grea_36e_b32_seed0_20261106_161421_p4o6KB` |
 | E000-old | 旧服务器上补跑的 E000 协议（见运行目录 `resolved_config.yml`） | 未记录 | 旧服务器 `/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu` |
-| E003 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml` | `07e932b` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/`，待启动 |
+| E003 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml` | `07e932b` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*qmal*`，已完成 |
 
 ## 备注
 
@@ -73,3 +74,11 @@
 ### E000-old 旧服务器基线（2026-11-08）
 
 stg1 最佳为第 31 轮 val AP 63.88，stg2 最佳为第 35 轮 65.15，按实测 val AP 选 `best_stg2` 评估 test。test 只有 COCO 汇总输出（三位小数），六类 AP 尚未独立重算。与新服务器 E000 相比：val −0.14，test +0.3，均在单种子波动内。E003（Q-MAL）在旧服务器运行，只和 E000-old 作差。
+
+### E003 Q-MAL（2026-11-09）
+
+stg1 最佳第 31 轮 val AP 63.14，stg2 最佳第 35 轮 64.51 / 94.04 / 69.27，按 val 选 `best_stg2`。对 E000-old：val AP −0.64、AP50 +0.82、AP75 −0.70；
+test AP −1.3（61.4）、AP50 −0.1、AP75 −0.8、APs −1.5、APm −2.0、APl −1.2。未达 +0.5 晋级门槛，且下降超过约 0.4 的跨服务器波动，淘汰。
+判读：τ=1.5 让 ≥16 px 且误差 ≤1–2 px 的框目标分饱和到 ≈1，分数不再区分“准”和“很准”，高 IoU 阈值下的类内排序变差（AP50 略升、AP75 降）；
+小目标也没有受益（test APs 降）。说明 MAL 用严格 IoU 作目标带来的定位排序价值大于它对小目标分数的压低，原假设不成立。
+机制指标（分数差距）未测，因 AP 已下降，不影响结论。不再扫描 τ（属调参）。
