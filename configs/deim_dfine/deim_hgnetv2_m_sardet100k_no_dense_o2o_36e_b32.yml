@@ -1,0 +1,16 @@
+# E008: Dense O2O off on the fixed 36-epoch E000 protocol (8-GPU server), everything else unchanged.
+# Dense O2O in DEIM = Mosaic (mosaic_prob 0.5 in E000) + MixUp (mixup_prob 0.5 in E000). Both go to 0;
+# the other augmentations, their epoch policy, MAL, matcher, LR schedule, EMA, AMP and the DEIM COCO
+# initialization stay as in E000. Same comparison as E007 minus the MAL change.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_baseline_revision: b75a868
+
+output_dir: /root/zxy/experiments/deim_m_sardet100k_no_dense_o2o_36e_b32/seed0
+
+train_dataloader:
+  dataset:
+    transforms:
+      mosaic_prob: 0.
+  collate_fn:
+    mixup_prob: 0.
