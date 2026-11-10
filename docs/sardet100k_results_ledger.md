@@ -35,7 +35,7 @@
 | E002 | GREA 保护环证据注意力 | 0 | | | | | | | | | | | | | | | | | | 筛选中 |
 | E000-old | 基线（旧服务器） | 0 | 35 | 65.15 | — | 93.22 | 69.97 | | | | | | | | | | | 19.48M | | 基线（旧服务器） |
 | E003 | Q-MAL 像素容差质量目标（旧服务器，τ=1.5） | 0 | 35 | 64.51 | −0.64 | 94.04 | 69.27 | | | | | | | | | | | 19.48M | | 淘汰（对照 E000-old） |
-| E007 | 去掉 MAL 与 Dense O2O（VFL，无 Mosaic/MixUp；旧服务器） | 0 | | | | | | | | | | | | | | | | 19.48M | | 待启动（对照 E000-old） |
+| E007 | 去掉 MAL 与 Dense O2O（VFL，无 Mosaic/MixUp；旧服务器） | 0 | 35 | 66.01 | +0.86 | 93.70 | 70.68 | | | | | | | | | | | 19.48M | | 完成（对照 E000-old；诊断性对照，不是方法） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -46,6 +46,7 @@
 | E000 | 基线 | 0 | best_stg2 | 62.39 | 90.92 | 66.35 | 59.01 | 74.65 | 71.72 | 70.88 | 72.90 | 49.80 | 71.90 | 53.91 | 44.87 | 80.95 |
 | E000-old | 基线（旧服务器） | 0 | best_stg2 | 62.7 | 91.6 | 66.1 | 58.9 | 75.0 | 72.4 | 71.2 | | | | | | |
 | E003 | Q-MAL（旧服务器，τ=1.5） | 0 | best_stg2 | 61.4 | 91.5 | 65.3 | 57.4 | 73.0 | 71.2 | 69.6 | | | | | | |
+| E007 | 去掉 MAL 与 Dense O2O（旧服务器） | 0 | best_stg2 | 63.1 | 90.9 | 66.6 | 61.0 | 75.1 | 69.3 | 71.8 | | | | | | |
 
 ## 运行记录
 
@@ -56,7 +57,7 @@
 | E002 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml` | `10015d1` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_grea_36e_b32_seed0_20261106_161421_p4o6KB` |
 | E000-old | 旧服务器上补跑的 E000 协议（见运行目录 `resolved_config.yml`） | 未记录 | 旧服务器 `/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu` |
 | E003 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml` | `07e932b` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*qmal*`，已完成 |
-| E007 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server.yml` | 见启动目录 `start_command.sh` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*no_mal_no_dense_o2o*`，待启动 |
+| E007 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server.yml` | 见启动目录 `start_command.sh` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*no_mal_no_dense_o2o*`，已完成 |
 
 ## 备注
 
@@ -84,3 +85,11 @@ test AP −1.3（61.4）、AP50 −0.1、AP75 −0.8、APs −1.5、APm −2.0�
 判读：τ=1.5 让 ≥16 px 且误差 ≤1–2 px 的框目标分饱和到 ≈1，分数不再区分“准”和“很准”，高 IoU 阈值下的类内排序变差（AP50 略升、AP75 降）；
 小目标也没有受益（test APs 降）。说明 MAL 用严格 IoU 作目标带来的定位排序价值大于它对小目标分数的压低，原假设不成立。
 机制指标（分数差距）未测，因 AP 已下降，不影响结论。不再扫描 τ（属调参）。
+
+### E007 去掉 MAL 与 Dense O2O（2026-11-09）
+
+stg1 最佳第 31 轮 val AP 65.64，stg2 最佳第 35 轮 66.01 / 93.70 / 70.68，按 val 选 `best_stg2`。对 E000-old：val AP +0.86、AP50 +0.48、AP75 +0.71；
+test AP +0.4（63.1）、AP50 −0.7、AP75 +0.5、APs +2.1（61.0）、APm +0.1、APl −3.1（69.3）、AR100 +0.6。单种子。
+判读：在 SARDet-100K 的 36 轮协议下，DEIM 的 MAL 与 Dense O2O 合起来没有带来增益，val 反而低 0.86；小目标受损（test APs −2.1），大目标受益（APl +3.1）。
+与 Mosaic 诊断（把目标缩到像素极限、跨来源拼接）方向一致，但这里两个机制同时去掉，不能单独归因。E008（只去 Dense O2O，8 卡服务器）对照 E000 后可分开；
+MAL 的单独作用只能跨服务器推算（约 0.4 AP 波动）。
