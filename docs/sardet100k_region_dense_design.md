@@ -1,6 +1,6 @@
 # RegionDense：保留目标尺度与局部背景的 Dense O2O 候选方案
 
-状态：方法已实现；CPU 几何检验支持其可行性；AP 与收敛速度尚未验证。
+状态：方法已实现；本地及服务器功能验证通过；真实训练图片 CPU 检验通过；AP 与收敛速度尚未验证。
 这是一个完整候选，不是已经证明有效的新方法。正式实验只安排这一版，先与较强的 E008 比。
 
 ## 1. 具体解决什么
@@ -46,6 +46,36 @@ E008 去掉 Mosaic 与 MixUp 后优于 E000，但这不能证明所有差异都�
 原始诊断：`/root/zxy/experiments/diagnostics/region_dense_design_20261110_b01/`。
 正式实现的区域库和真实像素核验分别通过下列命令生成，应以它们的报告为实施依据。
 
+### 正式实现的实际结果
+
+代码提交 `b75cbaa` 已在新服务器完成以下工作（没有运行模型训练）：
+
+- 区域库覆盖 94,493 张训练图、198,676 个 GT；构建耗时约 92 秒，只读取训练标注。
+- 全训练集主图分流：42,718 张四格、20,202 张两格、31,573 张整图。每种分流都保留主图全部 GT。
+- 正式数据构造器重放 10,000 次：普通输入平均 2.1286 GT；每次尝试组图并计入回退时 4.4100 GT；按配置 0.5 概率折算，增强阶段平均 3.2693 GT，增加 53.6%。
+- 这 10,000 次中，按概率折算后的普通整图比例约 66.4%；其余为两格或四格。
+- 主图普通抽样不变。新增 GT 类别比例在设计期望上匹配训练集；这次重放的六类曝光倍率，在真实 0.5 概率下分别为 ship 1.550、aircraft 1.494、car 1.540、tank 1.564、bridge 1.553、harbor 1.429。小类别有有限样本波动，不能把期望相同写成每次重放精确相同。
+- 200 张真实组图核验：裁块像素逐值等于普通 640 缩放后的对应区域；GT 边长最大数值差约 1.14e-13 px；后续 Sanitize 删除目标数为 0；完整转换管线输出有效。
+- 全部 623,938 个补图候选区域，按实际数据集的 float32 框转换重新检查：没有出现可见目标漏标、裁断受保护邻域或类别计数不一致。
+- Windows `pytorch` 与服务器 `deim_zxy` 均通过 5 项针对性功能测试。
+
+注意，“增加 53.6%”只针对启用增强的 16 轮；按照相同抽样均值折算整个 36 轮，平均约 2.636 GT/输入，比普通训练增加约 23.8%。这不是监督质量或 AP 增益。
+
+实际产物：
+
+```text
+/root/zxy/experiments/region_banks/sardet100k_train_region_dense_v1.npz
+/root/zxy/experiments/region_banks/sardet100k_train_region_dense_v1.json
+/root/zxy/experiments/diagnostics/region_dense_design_20261110_b01/implementation_audit/report.json
+/root/zxy/experiments/diagnostics/region_dense_design_20261110_b01/implementation_audit/example_003_31494.jpg
+/root/zxy/experiments/diagnostics/region_dense_design_20261110_b01/float32_geometry_check.json
+```
+
+示例中 image 31494 的主图有 6 个 tank；组图仍保留这 6 个目标及原有尺度，并补入 3 个完整目标，总数为 9。另一张 bridge 主图通过两格拼接从 2 个目标增至 17 个，展示两种布局均能工作。
+这些展示不是模型预测图，绿色框是主图 GT，橙色框是补图 GT。
+
+当前训练状态：未启动。2026-11-10 最后一次现场检查 GPU 4、5 均为 100% 利用率、显存约 22 GB，不能把之前的空闲状态当作当前仍可用。没有启动等待队列，也没有修改其他任务。
+
 本地 `tests/test_region_dense.py` 检查：四格/两格/整图分流、主图 GT 保留、所有可见 GT 邻域保留、裁块像素与普通缩放结果一致、框边长不变、类别期望比例、增强轮次及完整数据管线；同时比较解析后的配置，确认其余训练协议与 E008 相同。
 这些检查不证明模型能从新增目标中学到更多，也不证明训练更快。
 
@@ -87,6 +117,14 @@ git status --short --branch
 git fetch origin
 git switch main
 git -c pull.rebase=false pull --ff-only origin main
+```
+
+本次服务器访问 GitHub 超时，已通过 Git bundle 快进到与 origin/main 已发布的同一代码提交；没有直接拷贝文件覆盖工作树。若服务器显示相对旧 origin/main “ahead”，这是远程跟踪引用尚未刷新；正常网络恢复后运行上面的 fetch/pull 即可。离线 Git 交接方法如下，路径需使用实际传输的 bundle：
+
+```bash
+git status --short --branch
+git fetch /root/zxy/experiments/diagnostics/region_dense_design_20261110_b01/source.bundle main
+git merge --ff-only FETCH_HEAD
 ```
 
 只需一次的训练区域库准备（已存在同一库时直接复用；需要新参数则换新文件名及新配置，不覆盖）：
