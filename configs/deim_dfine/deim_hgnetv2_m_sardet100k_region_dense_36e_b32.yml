@@ -1,0 +1,31 @@
+# One complete candidate: region selection + native-scale packing, ordinary full-image branch.
+# E008 is the stronger direct control; E000 remains the original DEIM control.
+__include__: ['./deim_hgnetv2_m_sardet100k_no_dense_o2o_36e_b32.yml']
+
+experiment_protocol_document: docs/sardet100k_region_dense_design.md
+experiment_baseline_revision: b75a868
+output_dir: /root/zxy/experiments/deim_m_sardet100k_region_dense_36e_b32/seed0
+
+train_dataloader:
+  dataset:
+    transforms:
+      mosaic_prob: 0.
+      ops:
+        - type: RegionDense
+          bank_path: /root/zxy/experiments/region_banks/sardet100k_train_region_dense_v1.npz
+          size: 640
+          context_margin: 1.0
+          probability: 0.5
+          epochs: [4, 20]
+          max_targets: 300
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: Resize, size: [640, 640]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}
+      policy:
+        ops: ['RegionDense', 'RandomPhotometricDistort']
+  collate_fn:
+    mixup_prob: 0.
