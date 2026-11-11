@@ -3,6 +3,8 @@
 状态：36 轮训练与完整 test 评估已完成。val AP 66.12、test AP 63.43；相对 E008 分别 +0.26、+0.11，未达预设晋级线。
 详细证据见 [RegionDense 结果](sardet100k_region_dense_results.md)。以下保留实验前设计及判断标准。
 
+后续辅助模块方向及新 CPU 诊断见 [SAR 背景相容性与目标频率修正](sardet100k_region_dense_sar_followup.md)；该记录没有改写本次实验的预设标准。
+
 ## 1. 具体解决什么
 
 原 Dense O2O 通过拼图和 MixUp 增加每张输入中的真实目标，从而增加一对一匹配的正样本。

@@ -168,16 +168,21 @@ def de_model(model):
 
 
 def warp_loader(loader, shuffle=False):
-    if is_dist_available_and_initialized():
+    if hasattr(loader.dataset, 'make_sampler'):
+        sampler = loader.dataset.make_sampler(
+            batch_size=loader.batch_size, num_replicas=get_world_size(), rank=get_rank(),
+            shuffle=shuffle, drop_last=loader.drop_last)
+    elif is_dist_available_and_initialized():
         sampler = DistributedSampler(loader.dataset, shuffle=shuffle)
-        loader = DataLoader(loader.dataset,
-                            loader.batch_size,
-                            sampler=sampler,
-                            drop_last=loader.drop_last,
-                            collate_fn=loader.collate_fn,
-                            pin_memory=loader.pin_memory,
-                            num_workers=loader.num_workers)
-    return loader
+    else:
+        return loader
+    return DataLoader(loader.dataset,
+                      loader.batch_size,
+                      sampler=sampler,
+                      drop_last=loader.drop_last,
+                      collate_fn=loader.collate_fn,
+                      pin_memory=loader.pin_memory,
+                      num_workers=loader.num_workers)
 
 
 

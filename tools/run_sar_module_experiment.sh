@@ -69,6 +69,10 @@ if mode == 'new':
     (run / 'git_worktree_status.txt').write_text(subprocess.check_output(['git', 'status', '--short'], text=True), encoding='utf-8')
     protocol = cfg.get('experiment_protocol_document', 'docs/sar_structure_frequency_experiments.md')
     (run / 'method_and_protocol.md').write_text(Path(protocol).read_text(encoding='utf-8'), encoding='utf-8')
+    if cfg['train_dataloader']['dataset'].get('plan_dir'):
+        plans = Path(cfg['train_dataloader']['dataset']['plan_dir'])
+        for name in ('plan_metadata.json', 'plan_report.json'):
+            (run / ('region_dense_sar_' + name)).write_text((plans / name).read_text(encoding='utf-8'), encoding='utf-8')
     stats = Path(cfg['train_dataloader']['dataset']['ann_file']).with_name('stats.json')
     if stats.is_file():
         (run / 'dataset_stats.json').write_text(stats.read_text(), encoding='utf-8')
@@ -79,6 +83,7 @@ train = cfg['train_dataloader']
 collate = train.get('collate_fn', {})
 criterion = cfg.get('DEIMCriterion', {})
 modules = {
+    'region_dense_sar': train['dataset']['type'] == 'RegionDenseSARCocoDetection',
     'imaging_geometry': bool(cfg.get('DFINETransformer', {}).get('use_imaging_geometry', False)),
     'grea': bool(cfg.get('DFINETransformer', {}).get('use_grea', False)),
     'fine_level': bool(cfg.get('DFINETransformer', {}).get('use_fine_level', False)),
@@ -128,7 +133,9 @@ metadata = dict(
     optimizer=cfg['optimizer'], lr_schedule=dict(name=cfg.get('lrsheduler'),
         warmup_iter=cfg.get('warmup_iter'), flat_epoch=cfg.get('flat_epoch'),
         no_aug_epoch=cfg.get('no_aug_epoch'), lr_gamma=cfg.get('lr_gamma')),
-    augmentation=dict(transforms=train['dataset']['transforms'], collate=collate),
+    augmentation=dict(transforms=train['dataset']['transforms'], collate=collate,
+                      region_dense_sar_plan=train['dataset'].get('plan_dir'),
+                      region_dense_sar_settings=train['dataset'].get('plan_settings')),
     ema=dict(enabled=cfg.get('use_ema'), settings=cfg.get('ema', {})),
     amp=dict(enabled=cfg.get('use_amp'), dtype=cfg.get('amp_dtype'),
              fp32_loss=cfg.get('amp_loss_fp32'), fp32_retry=cfg.get('amp_fp32_retry'), scaler=cfg.get('scaler', {})),
