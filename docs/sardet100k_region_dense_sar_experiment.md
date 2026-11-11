@@ -2,6 +2,16 @@
 
 本实验在用户授权的新服务器 GPU 4、5 上运行。直接对照 E008（关闭原 Dense O2O）和 E009（RegionDense v1）；原始 DEIM E000 保留为参考。诊断动机见 [后续设计](sardet100k_region_dense_sar_followup.md)。
 
+## 当前运行 E010
+
+2026-11-11 21:49:50（北京时间）已启动，训练代码 `33172bb`，launcher PID `1811655`。已观察到 epoch index 0 的第 100/2952 步，双卡均参与计算，当前损失有限、FP32 retry 为 0；尚无完整 epoch 的 val 指标。
+
+运行目录：`/root/zxy/experiments/regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`。
+
+Windows pytorch 和 Linux deim_zxy 各通过 11 项功能检查。全训练集背景特征和 16 轮计划已生成，用时 292.5 秒；每轮 2,952 步，增强阶段平均 3.1126 GT/输入，23 次完整源图遍历，实例出现 23–24 次。200 张实际组图核验通过，全部源图 GT 保留、像素与普通缩放后裁块一致，框边长最大数值差 5.68e-14 px，后续 Sanitize 删除数为 0。与 E000/E008/E009 实际保存的配置比较，只有本方案的数据构造及运行记录字段变化。
+
+CPU 报告、协议对比、功能检查日志和启动记录：`/root/zxy/experiments/diagnostics/region_dense_sar_prepare_20261111_NicyRp/`。以上为启动时状态，后续指标以运行目录 log.txt 为准。
+
 ## 方法与固定设置
 
 - 保持普通缩放至 640 后的目标尺度；每个目标周围保留一个自身长边的邻域，边界裁到原图范围。
@@ -26,7 +36,7 @@
 - `tools/audit_region_dense_sar.py`：全部增强 epoch 的 DDP 覆盖与真实像素/目标检查。
 - `tests/test_region_dense_sar.py`：源图完整遍历、不可裁图/空标注图、背景选择、双卡分片、跨 worker 与恢复一致性、其余配置与 E008 一致。
 
-本地功能检查不代表 GPU 训练完成；实际 CPU 构造报告、运行目录和启动状态在实验交接记录中另行保存。模型收益以最终 val/test 为准。先用 val 选择 checkpoint，test 不参与选参数。
+功能检查及已观察到的训练步骤不代表 36 轮训练完成。模型收益以最终 val/test 为准。先用 val 选择 checkpoint，test 不参与选参数。
 
 ## 新服务器命令
 
@@ -65,7 +75,7 @@ bash tools/run_sar_module_experiment.sh "$CFG"
 
 ```bash
 conda activate deim_zxy
-export OUT=/root/zxy/experiments/替换为启动输出的完整目录
+export OUT=/root/zxy/experiments/regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk
 tail -f "$OUT/console.log"
 nvidia-smi -i 4,5
 ps -p "$(cat "$OUT/launcher.pid")" -o pid,etime,args

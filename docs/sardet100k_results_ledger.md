@@ -66,6 +66,7 @@ E008、E009 的 test 依用户明确要求评估；未用 test 选择 checkpoint
 | E007 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server.yml` | 见启动目录 `start_command.sh` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*no_mal_no_dense_o2o*`，已完成 |
 | E008 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_dense_o2o_36e_b32.yml` | `7c3e899` | `deim_m_sar_aircraft_deim_hgnetv2_m_sardet100k_no_dense_o2o_36e_b32_seed0_20261109_180613_bVK0K3` |
 | E009 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_36e_b32.yml` | `6e305c3` | `regiondense_deim_hgnetv2_m_sardet100k_region_dense_36e_b32_seed0_20261110_203618_BjgqFF` |
+| E010 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml` | `33172bb` | `regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`（已启动，待完成） |
 
 ## 备注
 
@@ -111,3 +112,8 @@ E008 val 65.86 / test 63.32；E009 val 66.12 / test 63.43。E009 相对 E008：v
 未达到预设 E008 +0.5 的 val 晋级线，当前记录为未晋级。单种子局部收益不能作为稳定整体提升的结论。
 训练时长 E000 17:37:45、E008 18:01:28、E009 17:54:10；首次达到 val AP 65 的轮号（从 1 开始）分别为 35、30、28。
 详细指标、各类 AP、原始评估目录与复现命令见 [RegionDense 结果](sardet100k_region_dense_results.md)。
+
+### E010 RegionDenseSAR v2 启动（2026-11-11）
+
+在 E009 保尺度、保邻域基础上，引入保持源图完整遍历的 FIFO 组图和背景相容选择。用户授权在新服务器 GPU 4、5 启动，36 轮/global batch 32/seed0，其他训练及评估协议与 E008/E009 相同。已观察到第 1 轮训练步骤，尚无 val/test 结果；不提前写入结果表。
+方法、CPU 验证、实际运行目录与启动/恢复/评估命令见 [RegionDenseSAR 正式实验](sardet100k_region_dense_sar_experiment.md)。
