@@ -2,15 +2,17 @@
 
 本实验在用户授权的新服务器 GPU 4、5 上运行。直接对照 E008（关闭原 Dense O2O）和 E009（RegionDense v1）；原始 DEIM E000 保留为参考。诊断动机见 [后续设计](sardet100k_region_dense_sar_followup.md)。
 
-## 当前运行 E010
+## E010 已完成训练与 test 评估
 
-2026-11-11 21:49:50（北京时间）已启动，训练代码 `33172bb`，launcher PID `1811655`。已观察到 epoch index 0 的第 100/2952 步，双卡均参与计算，当前损失有限、FP32 retry 为 0；尚无完整 epoch 的 val 指标。
+2026-11-11 21:49:50（北京时间）启动，训练代码 `33172bb`，launcher PID `1811655`。现已完成 36 轮，训练时长 17:33:40；第 36 轮（index 35）达到最高 val AP 66.45。使用对应 best_stg2 的 EMA 权重完成官方 test 11,613 张图评估：AP 63.88、APs 62.07、APl 69.60。
+
+相对 E008：val AP +0.59、test AP +0.56；相对 RegionDense v1：test AP +0.45、APl +1.21，但 APl 仍比 E008 低 1.89。完整分类指标、比较和原始结果路径见 [E010 评估结果](sardet100k_region_dense_sar_results.md)。
 
 运行目录：`/root/zxy/experiments/regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`。
 
 Windows pytorch 和 Linux deim_zxy 各通过 11 项功能检查。全训练集背景特征和 16 轮计划已生成，用时 292.5 秒；每轮 2,952 步，增强阶段平均 3.1126 GT/输入，23 次完整源图遍历，实例出现 23–24 次。200 张实际组图核验通过，全部源图 GT 保留、像素与普通缩放后裁块一致，框边长最大数值差 5.68e-14 px，后续 Sanitize 删除数为 0。与 E000/E008/E009 实际保存的配置比较，只有本方案的数据构造及运行记录字段变化。
 
-CPU 报告、协议对比、功能检查日志和启动记录：`/root/zxy/experiments/diagnostics/region_dense_sar_prepare_20261111_NicyRp/`。以上为启动时状态，后续指标以运行目录 log.txt 为准。
+CPU 报告、协议对比、功能检查日志和启动记录：`/root/zxy/experiments/diagnostics/region_dense_sar_prepare_20261111_NicyRp/`。test 原始结果在训练目录下 `test_eval_best_stg2_lQ2o9V/`；评估过程和精确指标另有记录。
 
 ## 方法与固定设置
 

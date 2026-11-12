@@ -11,7 +11,7 @@
 | --- | --- |
 | 数据 | 官方划分：train 94,493 / val 10,492 / test 11,613，六类 |
 | 模型 / 初始化 | DEIM-D-FINE-M（HGNetv2-B2），`-t` 载入 COCO M 权重 |
-| 训练 | 36 轮，全局 batch 32（每卡 16），GPU 0、1 |
+| 训练 | 36 轮，全局 batch 32（每卡 16），双卡；具体 GPU 编号见运行记录 |
 | 输入 | 基础和验证 640；训练多尺度 480..800，第 32 轮起固定 640 |
 | 优化 | AdamW，主 LR 4e-4，骨干 4e-5，WD 1e-4；flatcosine，warmup 2000 步，flat 20 轮 |
 | 增强 | Mosaic、MixUp 各 p=0.5（第 4–20 轮），PhotometricDistort p=0.5（第 4–32 轮），翻转 p=0.5；关闭 ZoomOut、IoUCrop |
@@ -38,6 +38,7 @@
 | E007 | 去掉 MAL 与 Dense O2O（VFL，无 Mosaic/MixUp；旧服务器） | 0 | 35 | 66.01 | +0.86 | 93.70 | 70.68 | | | | | | | | | | | 19.48M | | 完成（对照 E000-old；诊断性对照，不是方法） |
 | E008 | 去掉 Dense O2O（MAL 保留） | 0 | 35 | 65.86 | +0.57 | 93.19 | 70.24 | 61.63 | 77.44 | 71.13 | 72.98 | 74.63 | 61.18 | 71.68 | 59.23 | 48.64 | 79.80 | 19.48M | 18:01:28 | 诊断性对照 |
 | E009 | RegionDense 保尺度区域拼图 | 0 | 35 | 66.12 | +0.83 | 93.62 | 70.76 | 62.18 | 77.74 | 70.62 | 73.00 | 75.39 | 62.23 | 71.51 | 59.09 | 48.73 | 79.77 | 19.48M | 17:54:10 | 未晋级（相对 E008 val +0.26） |
+| E010 | RegionDenseSAR v2 背景相容与源图遍历 | 0 | 35 | 66.45 | +1.16 | 93.72 | 71.08 | 62.89 | 78.16 | 71.37 | 73.91 | 75.37 | 62.77 | 70.44 | 59.46 | 49.13 | 81.55 | 19.48M | 17:33:40 | 晋级（对 E008 val +0.59；辅助候选） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -51,8 +52,9 @@
 | E007 | 去掉 MAL 与 Dense O2O（旧服务器） | 0 | best_stg2 | 63.1 | 90.9 | 66.6 | 61.0 | 75.1 | 69.3 | 71.8 | | | | | | |
 | E008 | 去掉 Dense O2O | 0 | best_stg2 | 63.32 | 91.10 | 67.11 | 60.97 | 75.25 | 71.49 | 70.72 | 73.41 | 49.61 | 71.79 | 56.61 | 46.98 | 81.50 |
 | E009 | RegionDense | 0 | best_stg2 | 63.43 | 90.96 | 67.57 | 61.94 | 75.17 | 68.39 | 70.92 | 73.80 | 49.16 | 72.13 | 56.29 | 47.31 | 81.87 |
+| E010 | RegionDenseSAR v2 | 0 | best_stg2 | 63.88 | 91.65 | 67.22 | 62.07 | 75.89 | 69.60 | 71.83 | 73.56 | 50.55 | 72.14 | 56.97 | 47.51 | 82.53 |
 
-E008、E009 的 test 依用户明确要求评估；未用 test 选择 checkpoint 或调整配置。
+E008、E009、E010 的 test 依用户明确要求评估；未用 test 选择 checkpoint 或调整配置。
 
 ## 运行记录
 
@@ -66,7 +68,7 @@ E008、E009 的 test 依用户明确要求评估；未用 test 选择 checkpoint
 | E007 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server.yml` | 见启动目录 `start_command.sh` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*no_mal_no_dense_o2o*`，已完成 |
 | E008 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_dense_o2o_36e_b32.yml` | `7c3e899` | `deim_m_sar_aircraft_deim_hgnetv2_m_sardet100k_no_dense_o2o_36e_b32_seed0_20261109_180613_bVK0K3` |
 | E009 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_36e_b32.yml` | `6e305c3` | `regiondense_deim_hgnetv2_m_sardet100k_region_dense_36e_b32_seed0_20261110_203618_BjgqFF` |
-| E010 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml` | `33172bb` | `regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`（已启动，待完成） |
+| E010 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml` | `33172bb` | `regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`（训练与 test 已完成，GPU 4、5） |
 
 ## 备注
 
@@ -113,7 +115,9 @@ E008 val 65.86 / test 63.32；E009 val 66.12 / test 63.43。E009 相对 E008：v
 训练时长 E000 17:37:45、E008 18:01:28、E009 17:54:10；首次达到 val AP 65 的轮号（从 1 开始）分别为 35、30、28。
 详细指标、各类 AP、原始评估目录与复现命令见 [RegionDense 结果](sardet100k_region_dense_results.md)。
 
-### E010 RegionDenseSAR v2 启动（2026-11-11）
+### E010 RegionDenseSAR v2 结果（2026-11-12 记录）
 
-在 E009 保尺度、保邻域基础上，引入保持源图完整遍历的 FIFO 组图和背景相容选择。用户授权在新服务器 GPU 4、5 启动，36 轮/global batch 32/seed0，其他训练及评估协议与 E008/E009 相同。已观察到第 1 轮训练步骤，尚无 val/test 结果；不提前写入结果表。
-方法、CPU 验证、实际运行目录与启动/恢复/评估命令见 [RegionDenseSAR 正式实验](sardet100k_region_dense_sar_experiment.md)。
+在 E009 保尺度、保邻域基础上，引入保持源图完整遍历的 FIFO 组图和背景相容选择。新服务器 GPU 4、5，36 轮/global batch 32/seed0，其余训练及评估协议与 E008/E009 相同。训练用时 17:33:40；按第 36 轮（index 35）的最高 val AP 66.45 选择 best_stg2 的 EMA 权重，完成完整 test 11,613 张图评估。
+
+test AP 63.88，较 E008 +0.56，较 E009 +0.45；APs 62.07，较 E008 +1.09；APl 69.60，较 E009 +1.21，但仍比 E008 低 1.89。相对 E008 六类 test AP 均上涨。达到 E008 +0.5 val AP 筛选线，记录为晋级的辅助候选；当前为单种子，两项改动的独立贡献尚未分开。
+分类指标、实际评估目录和重跑命令见 [RegionDenseSAR 评估结果](sardet100k_region_dense_sar_results.md)；方法、CPU 验证、训练/恢复命令见 [正式实验](sardet100k_region_dense_sar_experiment.md)。
