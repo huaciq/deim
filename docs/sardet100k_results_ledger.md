@@ -32,13 +32,19 @@
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | E000 | 基线 | 0 | 35 | 65.29 | — | 93.15 | 70.26 | 60.18 | 76.63 | 72.09 | 73.36 | 73.75 | 62.78 | 71.21 | 57.66 | 45.97 | 80.40 | 19.48M | 17:38 | 基线 |
 | E001 | M1 成像—标注几何解耦 | 0 | | | | | | | | | | | | | | | | | | 中止（第 2 轮后，用户决定不作为方法，无结论） |
-| E002 | GREA 保护环证据注意力 | 0 | | | | | | | | | | | | | | | | | | 筛选中 |
+| E002 | GREA 保护环证据注意力 | 0 | 35 | 64.37 | −0.92 | 93.28 | 69.03 | 59.20 | 75.76 | 69.71 | 72.42 | 73.44 | 61.48 | 71.23 | 57.47 | 45.85 | 76.73 | 19.92M | 18:48 | 淘汰 |
 | E000-old | 基线（旧服务器） | 0 | 35 | 65.15 | — | 93.22 | 69.97 | | | | | | | | | | | 19.48M | | 基线（旧服务器） |
 | E003 | Q-MAL 像素容差质量目标（旧服务器，τ=1.5） | 0 | 35 | 64.51 | −0.64 | 94.04 | 69.27 | | | | | | | | | | | 19.48M | | 淘汰（对照 E000-old） |
 | E007 | 去掉 MAL 与 Dense O2O（VFL，无 Mosaic/MixUp；旧服务器） | 0 | 35 | 66.01 | +0.86 | 93.70 | 70.68 | | | | | | | | | | | 19.48M | | 完成（对照 E000-old；诊断性对照，不是方法） |
+| E004 | 匹配分类代价 2→0.5（E1；系数 1 的运行已中止） | 0 | 35 | 65.28 | −0.01 | 87.99 | 73.20 | 58.93 | 77.36 | 71.77 | 78.28 | 74.28 | 64.96 | 72.07 | 56.72 | 44.35 | 79.32 | 19.48M | 18:13 | 淘汰 |
+| E005 | 框监督改为层内匹配（关闭并集） | 0 | | | | | | | | | | | | | | | | | | 暂停，未运行 |
+| E006 | E004 + E005 | 0 | | | | | | | | | | | | | | | | | | 暂停，未运行 |
 | E008 | 去掉 Dense O2O（MAL 保留） | 0 | 35 | 65.86 | +0.57 | 93.19 | 70.24 | 61.63 | 77.44 | 71.13 | 72.98 | 74.63 | 61.18 | 71.68 | 59.23 | 48.64 | 79.80 | 19.48M | 18:01:28 | 诊断性对照 |
 | E009 | RegionDense 保尺度区域拼图 | 0 | 35 | 66.12 | +0.83 | 93.62 | 70.76 | 62.18 | 77.74 | 70.62 | 73.00 | 75.39 | 62.23 | 71.51 | 59.09 | 48.73 | 79.77 | 19.48M | 17:54:10 | 未晋级（相对 E008 val +0.26） |
 | E010 | RegionDenseSAR v2 背景相容与源图遍历 | 0 | 35 | 66.45 | +1.16 | 93.72 | 71.08 | 62.89 | 78.16 | 71.37 | 73.91 | 75.37 | 62.77 | 70.44 | 59.46 | 49.13 | 81.55 | 19.48M | 17:33:40 | 晋级（对 E008 val +0.59；辅助候选） |
+| E011 | RegionDense + MixUp（E009 上只把 MixUp 概率 0→0.5） | 0 | | | | | | | | | | | | | | | | 19.48M | | 暂缓，未运行（见 [val 拆解](sardet100k_region_dense_val_breakdown.md)） |
+| E012 | 只加方向增强（垂直翻转、90° 旋转），结构不变 | 0 | | | | | | | | | | | | | | | | 19.48M | | 不做（[D18](sardet100k_d18_orientation_cue.md) 预示会下降） |
+| E013 | 方向共享编码与方向证据融合（基线 E000 协议，原图 + 垂直翻转） | 0 | | | | | | | | | | | | | | | | 19.58M | | 已实现，未运行（对照 E000；训练前检验 D18 不支持，见 [设计](sardet100k_orientation_fusion_design.md)） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -50,11 +56,15 @@
 | E000-old | 基线（旧服务器） | 0 | best_stg2 | 62.7 | 91.6 | 66.1 | 58.9 | 75.0 | 72.4 | 71.2 | | | | | | |
 | E003 | Q-MAL（旧服务器，τ=1.5） | 0 | best_stg2 | 61.4 | 91.5 | 65.3 | 57.4 | 73.0 | 71.2 | 69.6 | | | | | | |
 | E007 | 去掉 MAL 与 Dense O2O（旧服务器） | 0 | best_stg2 | 63.1 | 90.9 | 66.6 | 61.0 | 75.1 | 69.3 | 71.8 | | | | | | |
+| E002 | GREA（已淘汰） | 0 | best_stg2 | 61.75 | 90.71 | 66.07 | 58.38 | 73.85 | 69.19 | 70.08 | 72.44 | 50.21 | 71.59 | 53.94 | 44.49 | 77.83 |
+| E004 | 匹配分类代价 0.5（已淘汰） | 0 | best_stg2 | 61.8 | 85.1 | 69.0 | 58.2 | 74.8 | 70.1 | 75.7 | | | | | | |
 | E008 | 去掉 Dense O2O | 0 | best_stg2 | 63.32 | 91.10 | 67.11 | 60.97 | 75.25 | 71.49 | 70.72 | 73.41 | 49.61 | 71.79 | 56.61 | 46.98 | 81.50 |
 | E009 | RegionDense | 0 | best_stg2 | 63.43 | 90.96 | 67.57 | 61.94 | 75.17 | 68.39 | 70.92 | 73.80 | 49.16 | 72.13 | 56.29 | 47.31 | 81.87 |
 | E010 | RegionDenseSAR v2 | 0 | best_stg2 | 63.88 | 91.65 | 67.22 | 62.07 | 75.89 | 69.60 | 71.83 | 73.56 | 50.55 | 72.14 | 56.97 | 47.51 | 82.53 |
 
 E008、E009、E010 的 test 依用户明确要求评估；未用 test 选择 checkpoint 或调整配置。
+
+E002 的 test 是淘汰决定之后按用户要求评估的，没有参与筛选。E004 的 test 是训练结束后按用户要求评估的，同样没有参与筛选；只有 COCO 汇总输出（三位小数）。
 
 ## 运行记录
 
@@ -63,12 +73,18 @@ E008、E009、E010 的 test 依用户明确要求评估；未用 test 选择 che
 | E000 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml` | `455b196` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261105_125147_N2zAJh` |
 | E001 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32.yml` | `8e83207` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_m1_geometry_36e_b32_seed0_20261106_145049_1Gh5VI` |
 | E002 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_grea_36e_b32.yml` | `10015d1` | `deim_m_sardet100k_deim_hgnetv2_m_sardet100k_grea_36e_b32_seed0_20261106_161421_p4o6KB` |
+| E004 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_match_cls05_36e_b32.yml` | `51c280b` | 8 卡服务器 GPU 4、5：`deim_m_sardet100k_deim_hgnetv2_m_sardet100k_match_cls05_36e_b32_seed0_20261108_195504_7ewHSg`（之前的两次启动已中止，见[设计文档](sardet100k_matching_ablation.md)） |
 | E000-old | 旧服务器上补跑的 E000 协议（见运行目录 `resolved_config.yml`） | 未记录 | 旧服务器 `/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu` |
 | E003 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_qmal_36e_b32_old_server.yml` | `07e932b` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*qmal*`，已完成 |
 | E007 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_mal_no_dense_o2o_36e_b32_old_server.yml` | 见启动目录 `start_command.sh` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_*no_mal_no_dense_o2o*`，已完成 |
+| E004（系数 1，已中止） | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_match_cls1_36e_b32.yml` | `34ff56d` | 8 卡服务器：`deim_m_sardet100k_deim_hgnetv2_m_sardet100k_match_cls1_36e_b32_seed0_20261108_183430_XLvsRU`（第 1 轮内停止，无结果） |
+| E005 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_layer_box_36e_b32.yml` | `34ff56d` | 暂停，未运行 |
+| E006 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_match_cls1_layer_box_36e_b32.yml` | `34ff56d` | 暂停，未运行 |
 | E008 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_no_dense_o2o_36e_b32.yml` | `7c3e899` | `deim_m_sar_aircraft_deim_hgnetv2_m_sardet100k_no_dense_o2o_36e_b32_seed0_20261109_180613_bVK0K3` |
 | E009 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_36e_b32.yml` | `6e305c3` | `regiondense_deim_hgnetv2_m_sardet100k_region_dense_36e_b32_seed0_20261110_203618_BjgqFF` |
 | E010 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml` | `33172bb` | `regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`（训练与 test 已完成，GPU 4、5） |
+| E011 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_mixup_36e_b32.yml` | 待提交 | 暂缓，未运行 |
+| E013 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_36e_b32.yml` | 待提交 | 未运行（计划 8 卡服务器 GPU 4、5） |
 
 ## 备注
 
@@ -85,9 +101,22 @@ E008、E009、E010 的 test 依用户明确要求评估；未用 test 选择 che
 
 见 [基线诊断](sardet100k_baseline_diagnosis.md)。
 
+### E002 判读（2026-11-07）
+
+未达到晋级门槛，按预定标准淘汰，不补种子，也不做消融。判读见 [GREA 设计](sardet100k_grea_design.md#结果与判定e002)。六类 AP 来自独立重算（总 AP 64.37，与训练日志一致），结果在运行目录的 `independent_verify_20261106/`。
+
 ### E000-old 旧服务器基线（2026-11-08）
 
 stg1 最佳为第 31 轮 val AP 63.88，stg2 最佳为第 35 轮 65.15，按实测 val AP 选 `best_stg2` 评估 test。test 只有 COCO 汇总输出（三位小数），六类 AP 尚未独立重算。与新服务器 E000 相比：val −0.14，test +0.3，均在单种子波动内。E003（Q-MAL）在旧服务器运行，只和 E000-old 作差。
+
+### E004 匹配分类代价 0.5（2026-11-09）
+
+- **选权重：** stg1 最佳为第 31 轮，stg2 最佳为第 35 轮 val AP 65.28，按 val 选 `best_stg2`。
+- **相对 E000 的 val：** AP −0.01，AP50 −5.16，AP75 +2.94，AR100 +4.92。
+- **相对 E000 的 test：** AP −0.6（61.8），AP50 −5.8，AP75 +2.65，AR100 +4.8。
+- **结论：** 未达到 +0.5 的晋级门槛；预定的机制指标 2、3 也没有改善，淘汰。
+- **原因：** 匹配器确实选中了更好的框（OGSOD tank 末层匹配 IoU .645 → .698），但一对一去重失效：分数 ≥ .3 的重复框从 387 个增加到 5,991 个，OGSOD tank 从 79 个增加到 1,532 个。
+- **训练时长：** 18:13 含约 9% 的匹配统计开销。完整报告见[设计文档](sardet100k_matching_ablation.md#结果)。
 
 ### E003 Q-MAL（2026-11-09）
 
@@ -105,6 +134,14 @@ test AP +0.4（63.1）、AP50 −0.7、AP75 +0.5、APs +2.1（61.0）、APm +0.1
 与 Mosaic 诊断（把目标缩到像素极限、跨来源拼接）方向一致，但这里两个机制同时去掉，不能单独归因。E008（只去 Dense O2O，8 卡服务器）对照 E000 后可分开；
 MAL 的单独作用只能跨服务器推算（约 0.4 AP 波动）。
 
+### E008 去掉 Dense O2O（2026-11-10）
+
+8 卡服务器 GPU 4、5，`7c3e899`。stg1 最佳第 31 轮 val AP 65.42，stg2 最佳第 35 轮 65.86 / 93.19 / 70.24，按 val 选 `best_stg2`。
+对同服务器的 E000：val AP +0.57、AP50 +0.04、AP75 −0.02、APs +1.45、APm +0.81、APl −0.96、AR100 −0.38；
+test AP +0.93（63.32）、AP50 +0.18、AP75 +0.76、APs +1.96（60.97）、APm +0.60、APl −0.23。单种子。
+按类（val，见主表）：bridge +2.67、tank +1.57、ship +0.88、car +0.47、harbor −0.60、aircraft −1.60。
+判读：只关掉 Mosaic 与 MixUp、保留 MAL，val 就高 0.57，增益在小目标和中目标，按类看在 bridge 和 tank，aircraft 下降。E007（同时去掉 MAL）在旧服务器上是 +0.86，
+两者相差 0.29，在约 0.4 的跨服务器波动之内，所以 E007 的增益主要来自去掉 Dense O2O，MAL 单独的作用仍然无法从这两次运行中分开。
 
 ### E008 与 E009 RegionDense（2026-11-11）
 

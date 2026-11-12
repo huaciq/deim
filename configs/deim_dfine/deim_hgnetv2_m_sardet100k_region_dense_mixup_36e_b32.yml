@@ -1,0 +1,15 @@
+# E011: RegionDense (E009) with MixUp switched back on; nothing else changes.
+# Dense O2O in DEIM = Mosaic + MixUp. E009 replaced Mosaic by scale-preserving region packing and kept MixUp off.
+# The val breakdown (docs/sardet100k_region_dense_val_breakdown.md) shows that the only large loss of turning
+# Dense O2O off is the aircraft of the 512-px source (AP 62.6 -> 59.8, misses 261 -> 399), and that RegionDense cannot
+# touch those images: their targets are too large to pack, so they always take the unchanged full-image path.
+# MixUp is the remaining Dense O2O component that reaches them, and it does not shrink any target.
+# Controls: E009 (same without MixUp), E008 (Dense O2O off), E000 (original DEIM).
+__include__: ['./deim_hgnetv2_m_sardet100k_region_dense_36e_b32.yml']
+
+experiment_protocol_document: docs/sardet100k_region_dense_val_breakdown.md
+output_dir: /root/zxy/experiments/deim_m_sardet100k_region_dense_mixup_36e_b32/seed0
+
+train_dataloader:
+  collate_fn:
+    mixup_prob: 0.5

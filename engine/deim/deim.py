@@ -17,13 +17,27 @@ class DEIM(nn.Module):
         backbone: nn.Module,
         encoder: nn.Module,
         decoder: nn.Module,
+        orientation_fusion: dict = None,
     ):
         super().__init__()
         self.backbone = backbone
         self.decoder = decoder
         self.encoder = encoder
+        # Off by default. See engine/deim/orientation_fusion.py (E013).
+        self.orientation_fusion = None
+        if orientation_fusion:
+            from .orientation_fusion import OrientationSharedFusion
+            self.orientation_fusion = OrientationSharedFusion(**orientation_fusion)
+
+    def _encode(self, x):
+        out = self.encoder(self.backbone(x))
+        if isinstance(out, tuple):
+            raise ValueError('orientation_fusion expects an encoder that returns only its feature maps')
+        return out
 
     def forward(self, x, targets=None):
+        if self.orientation_fusion is not None:
+            return self.decoder(self.orientation_fusion(x, self._encode), targets)
         image_size = x.shape[-2:]
         images = x
         x = self.backbone(x)

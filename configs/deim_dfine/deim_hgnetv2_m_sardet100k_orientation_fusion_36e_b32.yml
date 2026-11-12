@@ -1,0 +1,25 @@
+# E013: orientation-shared encoding with orientation evidence fusion, on the unchanged E000 baseline protocol.
+# D17 (docs/sardet100k_d16_d17_source_orientation.md): with frozen weights a vertical flip of the val images lowers AP
+# from 65.3 to 38.2, for targets with and without a training near-duplicate alike; the detector's evidence is learned
+# per orientation. Here the image and its vertical flip go through ONE backbone and encoder (shared weights), the
+# flipped view's pyramid is mapped back onto the original grid, and a gate fuses the two per location and channel group.
+# Decoder, matcher, losses, augmentation (Dense O2O included), schedule, EMA, AMP and the DEIM COCO initialisation are
+# those of E000. Control: E000. The global batch size stays 32 on two GPUs: with checkpoint_views the views are
+# re-encoded during the backward pass instead of being stored (measured peak 11.9 GB against 15.0 GB for E000 in the
+# same synthetic step; without it E013 does not fit 16 images per 24 GB GPU). Gradients are unchanged.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_orientation_fusion_design.md
+output_dir: /root/zxy/experiments/deim_m_sardet100k_orientation_fusion_36e_b32/seed0
+
+DEIM:
+  orientation_fusion:
+    views: ['vflip']
+    hidden_dim: 256
+    num_levels: 3
+    groups: 8
+    reduction: 4
+    init_bias: 2.0
+    image_shift: 3
+    cell_shift: 1
+    checkpoint_views: True
