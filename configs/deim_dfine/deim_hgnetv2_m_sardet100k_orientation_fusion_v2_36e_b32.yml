@@ -1,0 +1,19 @@
+# E013-v2: two shared backbone/projection views -> aligned fusion -> ONE AIFI/FPN/PAN.
+# E000 protocol and COCO-M initialisation; this is a new run, never resume E013-v1 into it.
+# GPU 4,5 on the user's eight-GPU server, global batch 32 (16 images/rank).
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_orientation_fusion_v2.md
+experiment_baseline_revision: '455b196'
+output_dir: /root/zxy/experiments/deim_m_sardet100k_orientation_fusion_v2_36e_b32/seed0
+
+DEIM:
+  orientation_fusion:
+    stage: projected
+    views: ['vflip']
+    hidden_dim: 256
+    num_levels: 3
+    groups: 8
+    reduction: 4
+    init_bias: 2.0
+    checkpoint_views: True

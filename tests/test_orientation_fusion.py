@@ -116,7 +116,14 @@ class Model(unittest.TestCase):
             for g in fused.orientation_fusion.gates:
                 g[-1].bias[:groups] = 60.
             x = torch.rand(1, 3, 640, 640)
-            a, b = base(x), fused(x)
+            # V1 encodes both views as one batch in eval. CPU convolutions can
+            # round differently for B=1 and B=2; at random init even a tiny
+            # feature difference changes the decoder's top-k query order.
+            pair = torch.cat([x, fused.orientation_fusion.view(x, 'vflip')])
+            original = [level[:len(x)] for level in base._encode(pair)]
+            for single, paired in zip(base._encode(x), original):
+                torch.testing.assert_close(single, paired, atol=1e-6, rtol=1e-5)
+            a, b = base.decoder(original), fused(x)
             for g, s in zip(fused.orientation_fusion.gates, saved):
                 g[-1].bias.copy_(s)
         self.assertTrue(torch.allclose(a['pred_logits'], b['pred_logits'], atol=1e-3))

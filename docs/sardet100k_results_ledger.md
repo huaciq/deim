@@ -43,8 +43,8 @@
 | E009 | RegionDense 保尺度区域拼图 | 0 | 35 | 66.12 | +0.83 | 93.62 | 70.76 | 62.18 | 77.74 | 70.62 | 73.00 | 75.39 | 62.23 | 71.51 | 59.09 | 48.73 | 79.77 | 19.48M | 17:54:10 | 未晋级（相对 E008 val +0.26） |
 | E010 | RegionDenseSAR v2 背景相容与源图遍历 | 0 | 35 | 66.45 | +1.16 | 93.72 | 71.08 | 62.89 | 78.16 | 71.37 | 73.91 | 75.37 | 62.77 | 70.44 | 59.46 | 49.13 | 81.55 | 19.48M | 17:33:40 | 晋级（对 E008 val +0.59；辅助候选） |
 | E011 | RegionDense + MixUp（E009 上只把 MixUp 概率 0→0.5） | 0 | | | | | | | | | | | | | | | | 19.48M | | 暂缓，未运行（见 [val 拆解](sardet100k_region_dense_val_breakdown.md)） |
-| E012 | 只加方向增强（垂直翻转、90° 旋转），结构不变 | 0 | | | | | | | | | | | | | | | | 19.48M | | 不做（[D18](sardet100k_d18_orientation_cue.md) 预示会下降） |
-| E013 | 方向共享编码与方向证据融合（基线 E000 协议，原图 + 垂直翻转） | 0 | | | | | | | | | | | | | | | | 19.58M | | 已实现，未运行（对照 E000；训练前检验 D18 不支持，见 [设计](sardet100k_orientation_fusion_design.md)） |
+| E012 | 只加方向增强（垂直翻转、90° 旋转），结构不变 | 0 | | | | | | | | | | | | | | | | | 19.48M | | 暂缓，未运行（D18 原始裁块结果不作为完整检测器结论） |
+| E013 | 方向共享编码与方向证据融合（v1 历史实现，原图 + 垂直翻转） | 0 | | | | | | | | | | | | | | | 19.58M | | 已实现，未运行；保留用于历史复现，正式实验转入 E013-v2 |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -84,7 +84,8 @@ E002 的 test 是淘汰决定之后按用户要求评估的，没有参与筛选
 | E009 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_36e_b32.yml` | `6e305c3` | `regiondense_deim_hgnetv2_m_sardet100k_region_dense_36e_b32_seed0_20261110_203618_BjgqFF` |
 | E010 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml` | `33172bb` | `regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`（训练与 test 已完成，GPU 4、5） |
 | E011 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_mixup_36e_b32.yml` | 待提交 | 暂缓，未运行 |
-| E013 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_36e_b32.yml` | 待提交 | 未运行（计划 8 卡服务器 GPU 4、5） |
+| E013-v2 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32.yml` | 待提交 | 待启动（8 卡服务器 GPU 4、5） |
+| E013 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_36e_b32.yml` | `c59bd6e` | v1 历史配置，未运行 |
 
 ## 备注
 

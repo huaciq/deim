@@ -83,6 +83,7 @@ train = cfg['train_dataloader']
 collate = train.get('collate_fn', {})
 criterion = cfg.get('DEIMCriterion', {})
 modules = {
+    'orientation_fusion': cfg.get('DEIM', {}).get('orientation_fusion'),
     'region_dense_sar': train['dataset']['type'] == 'RegionDenseSARCocoDetection',
     'imaging_geometry': bool(cfg.get('DFINETransformer', {}).get('use_imaging_geometry', False)),
     'grea': bool(cfg.get('DFINETransformer', {}).get('use_grea', False)),

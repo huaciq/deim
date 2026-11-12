@@ -1,4 +1,6 @@
 # E013: orientation-shared encoding with orientation evidence fusion, on the unchanged E000 baseline protocol.
+# Historical v1: its checkpoint flag changes BN batching/replay statistics. For the revised formal run use
+# deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32.yml; v1 settings remain unchanged for reproducibility.
 # D17 (docs/sardet100k_d16_d17_source_orientation.md): with frozen weights a vertical flip of the val images lowers AP
 # from 65.3 to 38.2, for targets with and without a training near-duplicate alike; the detector's evidence is learned
 # per orientation. Here the image and its vertical flip go through ONE backbone and encoder (shared weights), the

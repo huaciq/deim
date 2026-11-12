@@ -598,6 +598,11 @@ class HybridEncoder(nn.Module):
 
         return torch.concat([out_w.sin(), out_w.cos(), out_h.sin(), out_h.cos()], dim=1)[None, :, :]
 
+    def project(self, feats):
+        """Project backbone levels without position encoding or cross-scale mixing."""
+        assert len(feats) == len(self.in_channels)
+        return [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+
     def forward(self, feats):
         # Handle P2 injection if enabled
         p2_feat = None
@@ -610,17 +615,27 @@ class HybridEncoder(nn.Module):
 
             # Inject P2 detail into S3
             p2_down = self.p2_inject(p2_feat)
-            proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+            proj_feats = self.project(feats)
             proj_feats[0] = proj_feats[0] + p2_down  # Residual injection
         elif self.s2_injection is not None:
             # Extra HGNet output is consumed here; the decoder still gets S3/S4/S5.
             assert len(feats) == len(self.in_channels) + 1
             s2, feats = feats[0], feats[1:]
-            proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+            proj_feats = self.project(feats)
             proj_feats[0] = self.s2_injection(s2, proj_feats[0])
         else:
             assert len(feats) == len(self.in_channels)
-            proj_feats = [self.input_proj[i](feat) for i, feat in enumerate(feats)]
+            proj_feats = self.project(feats)
+
+        return self.forward_projected(proj_feats, p2_feat=p2_feat)
+
+    def forward_projected(self, proj_feats, p2_feat=None):
+        """Run the original encoder body once on a projected, canonical pyramid.
+
+        Separating this entry point preserves all existing module/state-dict
+        names. The ordinary forward still projects and runs the same body.
+        """
+        proj_feats = list(proj_feats)
 
         # Reconstruct every projected level before transformer/FPN processing.
         if self.use_spi_module:

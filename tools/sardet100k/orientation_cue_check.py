@@ -61,8 +61,14 @@ def work(task):
         pos.append(crop((x0, y0, x1, y1)))
         ym, xm = (y0 + y1) // 2, (x0 + x1) // 2
         ratio = lambda a, b: (a - b) / (a + b + 1e-6)  # noqa: E731
-        top, bottom = box_sum(integral, x0, y0, x1, max(ym, y0 + 1)), box_sum(integral, x0, min(ym, y1 - 1), x1, y1)
-        left, right = box_sum(integral, x0, y0, max(xm, x0 + 1), y1), box_sum(integral, min(xm, x1 - 1), y0, x1, y1)
+        # Compare means: for odd extents the bottom/right half has one more
+        # pixel. Comparing sums falsely labels a uniform odd crop asymmetric.
+        top_end, bottom_start = max(ym, y0 + 1), min(ym, y1 - 1)
+        left_end, right_start = max(xm, x0 + 1), min(xm, x1 - 1)
+        top = box_sum(integral, x0, y0, x1, top_end) / (w * (top_end - y0))
+        bottom = box_sum(integral, x0, bottom_start, x1, y1) / (w * (y1 - bottom_start))
+        left = box_sum(integral, x0, y0, left_end, y1) / (h * (left_end - x0))
+        right = box_sum(integral, right_start, y0, x1, y1) / (h * (x1 - right_start))
         band_v, band_h = max(4, h // 2), max(4, w // 2)
         above = values[max(y0 - band_v, 0):y0, x0:x1]
         below = values[y1:min(y1 + band_v, height), x0:x1]
@@ -109,7 +115,7 @@ def extract(args):
             return str(i['width']) if i['width'] in (224, 512, 800) else 'misc'
         cell = np.array([f"{group(i)}/{names[a['category_id']]}" for i in images for a in by_image[i['id']]])
         np.savez_compressed(args.out / f'crops_{split}.npz', pos=np.concatenate([p[0] for p in parts]), neg=np.concatenate([p[1] for p in parts]),
-                            stats=np.concatenate([p[2] for p in parts]), cell=cell)
+                            stats=np.concatenate([p[2] for p in parts]), cell=cell, statistics_version=np.array('half_means_v2'))
         print(split, 'targets', len(cell), flush=True)
 
 
@@ -197,7 +203,8 @@ def analyse(args):
     import torch
     dev = args.device
     d = {s: dict(np.load(args.out / f'crops_{s}.npz')) for s in ('train', 'val')}
-    report = dict(statistics={}, flip_detection={}, usefulness={})
+    report = dict(statistics={}, flip_detection={}, usefulness={},
+                  statistics_version={s: str(d[s].get('statistics_version', 'legacy_half_sums_v1')) for s in d})
     cells = [c for c in np.unique(d['val']['cell']) if (d['val']['cell'] == c).sum() >= 100 and (d['train']['cell'] == c).sum() >= 300]
 
     # A

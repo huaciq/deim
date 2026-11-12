@@ -92,6 +92,9 @@ def _module_training_metrics(model):
     """Expose residual scales without adding diagnostic tensors to the loss."""
     module = dist_utils.de_model(model)
     values = {}
+    orientation = getattr(module, 'orientation_fusion', None)
+    if orientation is not None:
+        values.update({name: value.item() for name, value in getattr(orientation, 'last_metrics', {}).items()})
     for owner, name in [('encoder', 'dsg'), ('encoder', 'rem'), ('encoder', 'pacfg'),
                         ('encoder', 'pafp'), ('encoder', 'pgd_rem'), ('decoder', 'slqc')]:
         branch = getattr(getattr(module, owner, None), name, None)

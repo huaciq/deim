@@ -1,5 +1,9 @@
 # E013 方向共享编码与方向证据融合
 
+> 本文保留 E013-v1 的历史设计。2026-11-12 复核发现：检查点开关同时改变 BN 批次组织，且重计算重复更新滑动统计，
+> 因此原“梯度不变”的纯卷积测试不能外推到真实编码器。D18 的亮度统计及计算量对照也有更正。
+> 正式推进的独立配置改为 [E013-v2：投影后融合、单次编码器主体](sardet100k_orientation_fusion_v2.md)，不修改本版实验设置。
+
 日期：2026-11-12。只针对 SARDet-100K。状态：已实现并通过定向测试，**尚未训练**；训练前检验（[D18](sardet100k_d18_orientation_cue.md)）不支持它，预期与基线持平，见[训练前检验](#训练前检验d18)。代码 `engine/deim/orientation_fusion.py`，接入点 `engine/deim/deim.py`（默认关闭），配置 `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_36e_b32.yml`，测试 `tests/test_orientation_fusion.py`。
 
 ## 问题

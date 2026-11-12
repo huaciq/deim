@@ -25,9 +25,21 @@ class DEIM(nn.Module):
         self.encoder = encoder
         # Off by default. See engine/deim/orientation_fusion.py (E013).
         self.orientation_fusion = None
+        self.orientation_fusion_stage = 'encoded'
         if orientation_fusion:
-            from .orientation_fusion import OrientationSharedFusion
-            self.orientation_fusion = OrientationSharedFusion(**orientation_fusion)
+            fusion_config = dict(orientation_fusion)
+            self.orientation_fusion_stage = fusion_config.pop('stage', 'encoded')
+            if self.orientation_fusion_stage == 'projected':
+                from .orientation_projection_fusion import ProjectedOrientationFusion
+                self.orientation_fusion = ProjectedOrientationFusion(**fusion_config)
+            elif self.orientation_fusion_stage == 'encoded':
+                from .orientation_fusion import OrientationSharedFusion
+                self.orientation_fusion = OrientationSharedFusion(**fusion_config)
+            else:
+                raise ValueError(f'Unknown orientation fusion stage: {self.orientation_fusion_stage}')
+
+    def _project_orientation_view(self, x):
+        return self.encoder.project(self.backbone(x))
 
     def _encode(self, x):
         out = self.encoder(self.backbone(x))
@@ -37,6 +49,11 @@ class DEIM(nn.Module):
 
     def forward(self, x, targets=None):
         if self.orientation_fusion is not None:
+            if self.orientation_fusion_stage == 'projected':
+                projected = self.orientation_fusion(
+                    x, self._project_orientation_view,
+                    checkpoint_modules=(self.backbone, self.encoder.input_proj), targets=targets)
+                return self.decoder(self.encoder.forward_projected(projected), targets)
             return self.decoder(self.orientation_fusion(x, self._encode), targets)
         image_size = x.shape[-2:]
         images = x
