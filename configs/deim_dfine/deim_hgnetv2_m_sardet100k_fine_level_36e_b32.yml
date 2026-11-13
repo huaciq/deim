@@ -15,3 +15,5 @@ DFINETransformer:
   fine_s2_channels: 96
   fine_dim: 128
   fine_points: 3
+  # Activation checkpoint of the stride-4 block only (memory, not the method); outputs and gradients are unchanged.
+  fine_checkpoint: True

@@ -11,6 +11,8 @@ from engine.solver._solver import BaseSolver
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / 'configs/deim_dfine/deim_hgnetv2_m_sardet100k_fine_level_36e_b32.yml'
 BASELINE = ROOT / 'configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml'
+OLD_SERVER = ROOT / 'configs/deim_dfine/deim_hgnetv2_m_sardet100k_fine_level_36e_b32_old_server.yml'
+OLD_BASELINE = ROOT / 'configs/deim_dfine/deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml'
 GENERATED = {'decoder.anchors', 'decoder.valid_mask'}
 
 
@@ -94,7 +96,46 @@ class Model(unittest.TestCase):
         self.assertEqual(changed, {'HGNetv2', 'DFINETransformer', 'output_dir', 'experiment_protocol_document', 'experiment_baseline_revision'})
         self.assertEqual(fine['HGNetv2']['return_idx'], [0, 1, 2, 3])
         difference = {k for k in set(fine['DFINETransformer']) | set(base['DFINETransformer']) if fine['DFINETransformer'].get(k) != base['DFINETransformer'].get(k)}
-        self.assertEqual(difference, {'use_fine_level', 'fine_s2_channels', 'fine_dim', 'fine_points'})
+        self.assertEqual(difference, {'use_fine_level', 'fine_s2_channels', 'fine_dim', 'fine_points', 'fine_checkpoint'})
+
+    def test_old_server_config_differs_from_e000_old_only_by_the_module(self):
+        old, base, new = YAMLConfig(str(OLD_SERVER)).yaml_cfg, YAMLConfig(str(OLD_BASELINE)).yaml_cfg, YAMLConfig(str(CONFIG)).yaml_cfg
+        changed = {k for k in set(old) | set(base) if old.get(k) != base.get(k)} - {'__include__'}
+        self.assertEqual(changed, {'HGNetv2', 'DFINETransformer', 'output_dir', 'experiment_protocol_document', 'experiment_baseline_revision'})
+        self.assertEqual(old['DFINETransformer'], new['DFINETransformer'])
+        self.assertEqual(old['HGNetv2'], new['HGNetv2'])
+        for split in ('train_dataloader', 'val_dataloader'):
+            self.assertTrue(old[split]['dataset']['img_folder'].startswith('/data2/zxy/sar/datasets/SARDet_100K/'))
+
+
+class Checkpoint(unittest.TestCase):
+    def test_checkpoint_keeps_outputs_gradients_and_one_bn_update(self):
+        from engine.deim.fine_level import FineLevelNeck
+        torch.manual_seed(0)
+        plain = FineLevelNeck(8, 16, 8).train()
+        stored = FineLevelNeck(8, 16, 8, checkpoint=True).train()
+        stored.load_state_dict(plain.state_dict())
+        s2, p3 = torch.randn(2, 8, 12, 12), torch.randn(2, 16, 6, 6)
+        outputs = []
+        for module in (plain, stored):
+            a, b = s2.clone().requires_grad_(), p3.clone().requires_grad_()
+            out = module(a, b)
+            (out * torch.linspace(-1, 1, out.numel()).reshape(out.shape)).sum().backward()
+            outputs.append((out.detach(), a.grad, b.grad, {n: p.grad for n, p in module.named_parameters()}))
+        (o1, a1, b1, g1), (o2, a2, b2, g2) = outputs
+        self.assertTrue(torch.allclose(o1, o2, atol=1e-6))
+        self.assertTrue(torch.allclose(a1, a2, atol=1e-5) and torch.allclose(b1, b2, atol=1e-5))
+        for name in g1:
+            self.assertTrue(torch.allclose(g1[name], g2[name], atol=1e-5), name)
+        for name, buffer in plain.state_dict().items():
+            self.assertTrue(torch.equal(buffer, stored.state_dict()[name]), name)
+        self.assertEqual(int(stored.s2_norm.num_batches_tracked), 1)
+
+    def test_eval_does_not_checkpoint(self):
+        from engine.deim.fine_level import FineLevelNeck
+        neck = FineLevelNeck(8, 16, 8, checkpoint=True).eval()
+        with torch.no_grad():
+            self.assertEqual(neck(torch.randn(1, 8, 12, 12), torch.randn(1, 16, 6, 6)).shape, (1, 16, 12, 12))
 
 
 if __name__ == '__main__':

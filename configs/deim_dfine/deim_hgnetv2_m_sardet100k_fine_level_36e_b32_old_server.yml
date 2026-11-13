@@ -1,0 +1,21 @@
+# E015 stride-4 level on the old server: the old-server E000 protocol plus the module, nothing else.
+# Same module settings as deim_hgnetv2_m_sardet100k_fine_level_36e_b32.yml; compare against E000-old
+# (/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu).
+# See docs/sardet100k_d28_d29_third_method.md and docs/sardet100k_fine_level_design.md.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml']
+
+experiment_protocol_document: docs/sardet100k_fine_level_design.md
+experiment_baseline_revision: 455b196
+
+output_dir: /data2/zxy/sar/experiments/deim_m_sardet100k_fine_level_36e_b32_old_server/seed0
+
+HGNetv2:
+  return_idx: [0, 1, 2, 3]
+
+DFINETransformer:
+  use_fine_level: True
+  fine_s2_channels: 96
+  fine_dim: 128
+  fine_points: 3
+  # Activation checkpoint of the stride-4 block only (memory, not the method); outputs and gradients are unchanged.
+  fine_checkpoint: True

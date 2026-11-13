@@ -846,6 +846,7 @@ class DFINETransformer(nn.Module):
                  fine_s2_channels=96,
                  fine_dim=128,
                  fine_points=3,
+                 fine_checkpoint=False,
                  ):
         super().__init__()
         if use_mdcc and (use_sdcp or use_bccq or use_slqc or query_select_method == 'agnostic'):
@@ -1125,7 +1126,7 @@ class DFINETransformer(nn.Module):
         self.fine_neck = None
         if use_fine_level:
             with torch.random.fork_rng(devices=[]):
-                self.fine_neck = FineLevelNeck(fine_s2_channels, hidden_dim, fine_dim)
+                self.fine_neck = FineLevelNeck(fine_s2_channels, hidden_dim, fine_dim, checkpoint=fine_checkpoint)
 
     def convert_to_deploy(self):
         self.scs_head = None
