@@ -1,0 +1,12 @@
+# E016 / RegionDenseSAR v3: unequal partitions only after E010 fixed routes fail.
+__include__: ['./deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml']
+
+experiment_protocol_document: docs/sardet100k_region_dense_adaptive_experiment.md
+output_dir: /root/zxy/experiments/deim_m_sardet100k_region_dense_adaptive_36e_b32/seed0
+
+train_dataloader:
+  dataset:
+    type: RegionDenseAdaptiveCocoDetection
+    plan_dir: /root/zxy/experiments/region_banks/sardet100k_train_region_dense_sar_v3_seed0_b32
+    plan_settings:
+      adaptive_partition: true
