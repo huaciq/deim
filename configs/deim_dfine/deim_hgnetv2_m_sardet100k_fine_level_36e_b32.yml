@@ -15,5 +15,6 @@ DFINETransformer:
   fine_s2_channels: 96
   fine_dim: 128
   fine_points: 3
-  # Activation checkpoint of the stride-4 block only (memory, not the method); outputs and gradients are unchanged.
+  # Memory-saving execution only (outputs, gradients and BN statistics unchanged): recompute the stride-4 block and
+  # the encoder-output scoring over all tokens in backward; share one contiguous decoder value copy per level.
   fine_checkpoint: True

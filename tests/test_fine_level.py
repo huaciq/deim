@@ -131,6 +131,35 @@ class Checkpoint(unittest.TestCase):
             self.assertTrue(torch.equal(buffer, stored.state_dict()[name]), name)
         self.assertEqual(int(stored.s2_norm.num_batches_tracked), 1)
 
+    def test_memory_saving_model_matches_plain_model(self):
+        import copy
+        torch.manual_seed(0)
+        saving = build(CONFIG).train()
+        self.assertTrue(saving.decoder.fine_neck.checkpoint and saving.decoder.decoder.contiguous_values)
+        plain = copy.deepcopy(saving)
+        plain.decoder.fine_neck.checkpoint = False
+        plain.decoder.decoder.contiguous_values = False
+        images = torch.rand(2, 3, 320, 320)
+        targets = [{'boxes': torch.tensor([[.5, .5, .05, .05], [.2, .3, .1, .1]]), 'labels': torch.tensor([3, 0])},
+                   {'boxes': torch.tensor([[.3, .3, .1, .2]]), 'labels': torch.tensor([4])}]
+        results = []
+        for model in (plain, saving):
+            torch.manual_seed(1)     # denoising queries are random
+            out = model(images, targets)
+            loss = (out['pred_boxes'].sum() + out['pred_logits'].sigmoid().sum() + out['enc_aux_outputs'][0]['pred_logits'].sigmoid().sum()
+                    + sum(a['pred_logits'].sigmoid().sum() for a in out['aux_outputs']))
+            loss.backward()
+            results.append((out['pred_logits'].detach(), out['pred_boxes'].detach(),
+                            {n: p.grad.clone() for n, p in model.named_parameters() if p.grad is not None},
+                            {n: b.clone() for n, b in model.named_buffers()}))
+        (l1, b1, g1, r1), (l2, b2, g2, r2) = results
+        self.assertTrue(torch.allclose(l1, l2, atol=1e-5) and torch.allclose(b1, b2, atol=1e-6))
+        self.assertEqual(set(g1), set(g2))
+        for name in g1:
+            self.assertTrue(torch.allclose(g1[name], g2[name], rtol=1e-4, atol=1e-6), name)
+        for name in r1:
+            self.assertTrue(torch.equal(r1[name], r2[name]), name)
+
     def test_eval_does_not_checkpoint(self):
         from engine.deim.fine_level import FineLevelNeck
         neck = FineLevelNeck(8, 16, 8, checkpoint=True).eval()

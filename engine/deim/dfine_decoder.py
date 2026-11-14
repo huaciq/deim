@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
+import torch.utils.checkpoint
 from typing import List
 
 from .dfine_utils import weighting_function, distance2bbox
@@ -613,7 +614,12 @@ class TransformerDecoder(nn.Module):
             value = value * memory_mask.to(value.dtype).unsqueeze(-1)
         value = value.reshape(value.shape[0], value.shape[1], self.num_head, -1)
         split_shape = [h * w for h, w in memory_spatial_shapes]
-        return value.permute(0, 2, 3, 1).split(split_shape, dim=-1)
+        parts = value.permute(0, 2, 3, 1).split(split_shape, dim=-1)
+        if getattr(self, 'contiguous_values', False):
+            # One contiguous copy per level, shared by all layers. Otherwise every layer's reshape inside the
+            # deformable attention makes and keeps its own copy for backward. Same values, only the layout differs.
+            parts = tuple(part.contiguous() for part in parts)
+        return parts
 
     def convert_to_deploy(self):
         self.project = weighting_function(self.reg_max, self.up, self.reg_scale, deploy=True)
@@ -1127,6 +1133,9 @@ class DFINETransformer(nn.Module):
         if use_fine_level:
             with torch.random.fork_rng(devices=[]):
                 self.fine_neck = FineLevelNeck(fine_s2_channels, hidden_dim, fine_dim, checkpoint=fine_checkpoint)
+            # fine_checkpoint is memory-saving execution only: the stride-4 block and the encoder-output scoring over
+            # all tokens are recomputed in backward, and the decoder shares one contiguous value copy per level.
+            self.decoder.contiguous_values = bool(fine_checkpoint)
 
     def convert_to_deploy(self):
         self.scs_head = None
@@ -1260,10 +1269,15 @@ class DFINETransformer(nn.Module):
 
         # memory = torch.where(valid_mask, memory, 0)
         # TODO fix type error for onnx export
-        memory = valid_mask.to(memory.dtype) * memory
-
-        output_memory :torch.Tensor = self.enc_output(memory)
-        enc_outputs_logits :torch.Tensor = self.enc_score_head(output_memory)
+        if self.fine_neck is not None and self.fine_neck.checkpoint and self.training and torch.is_grad_enabled():
+            def score_all(memory):
+                output_memory = self.enc_output(valid_mask.to(memory.dtype) * memory)
+                return output_memory, self.enc_score_head(output_memory)
+            output_memory, enc_outputs_logits = torch.utils.checkpoint.checkpoint(score_all, memory, use_reentrant=False)
+        else:
+            memory = valid_mask.to(memory.dtype) * memory
+            output_memory :torch.Tensor = self.enc_output(memory)
+            enc_outputs_logits :torch.Tensor = self.enc_score_head(output_memory)
 
         enc_topk_bboxes_list, enc_topk_logits_list = [], []
         enc_topk_memory, enc_topk_logits, enc_topk_anchors = \
