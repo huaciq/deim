@@ -256,4 +256,78 @@ COCO bbox 的 0、1、2 项是 AP@[.50:.95]、AP50、AP75，原始 0..1 值乘 1
 
 权重载入的缺失项与 E000 相同，另加新增的门控参数。按每步 1.47 倍估计，36 轮约 25–27 小时；以日志实测为准。
 
-完整训练尚无结果。
+## 36 轮训练与完整 test 结果
+
+2026-11-13 记录。36 轮全部完成，最高 val AP 出现在第 36 轮（日志 epoch=35）。按 val 选择 best_stg2.pth，其 last_epoch=35，使用 EMA 权重。
+test 为官方 11,613 张图、24,203 个标注；val 为 10,492 张图。640 输入、双卡 GPU 4/5、全局评估 batch 64、top-300 后处理、COCO bbox maxDets=100。
+evaluate() 的模型前向使用 FP32，命令中的 --use-amp 沿用训练配置。训练代码 revision 为 5e90eb1，本次评估 revision 为 ad6ac6f。
+
+| 划分 | 方法 | AP | AP50 | AP75 | APs | APm | APl | AR100 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| val | E000 | 65.29 | 93.15 | 70.26 | 60.18 | 76.63 | 72.09 | 73.36 |
+| val | E013-v2 | 67.26 | 94.53 | 72.86 | 61.91 | 78.73 | 71.50 | 74.41 |
+| val | 差值 | +1.97 | +1.38 | +2.59 | +1.73 | +2.10 | -0.59 | +1.05 |
+| test | E000 | 62.39 | 90.92 | 66.35 | 59.01 | 74.65 | 71.72 | 70.88 |
+| test | E013-v2 | 64.74 | 92.61 | 69.26 | 61.15 | 76.57 | 71.91 | 72.25 |
+| test | 差值 | +2.35 | +1.70 | +2.91 | +2.14 | +1.92 | +0.19 | +1.37 |
+
+| 类别 | val AP | 相对 E000 | test AP | 相对 E000 |
+|---|---:|---:|---:|---:|
+| ship | 73.75 | +0.01 | 72.74 | -0.16 |
+| aircraft | 62.57 | -0.22 | 51.38 | +1.57 |
+| car | 71.20 | -0.01 | 72.02 | +0.12 |
+| tank | 58.24 | +0.56 | 55.05 | +1.14 |
+| bridge | 53.27 | +7.30 | 51.80 | +6.93 |
+| harbor | 84.55 | +4.15 | 85.44 | +4.50 |
+
+AP 差值用未四舍五入数据计算。通过既定 E000 +0.5 val AP 筛选线，记录为晋级的主方法候选。当前为 seed 0 单次运行。
+bridge、harbor 在两个划分上贡献较大；aircraft 的 val AP 下降 0.22、test 上涨 1.57。无副本分组与移除翻转分支的消融尚未评估，方向互补的独立贡献仍需后续实验判断。
+
+| 训练轮号（从 1 开始） | val AP |
+|---|---:|
+| 1 | 36.90 |
+| 10 | 50.41 |
+| 20 | 56.40 |
+| 30 | 65.18 |
+| 32 | 66.05 |
+| 35 | 67.03 |
+| 36 | 67.26 |
+
+训练日志里的 test_coco_eval_bbox 对应训练期间的 val；日志没有计算 train 集 AP。首次达到 60/65/66/67 AP 的轮号分别为 24/30/32/35。
+训练总耗时 27:25:26，E000 为 17:37:45，约 1.56 倍。训练 loss 从 32.05 降到 15.97，全程 FP32 retry rate 为 0。
+末轮翻转分支平均权重 P3/P4/P5 为 31.2%/42.1%/34.6%，目标中心对应 31.5%/42.4%/36.4%。
+
+首次 test 评估因 SSH 默认文件句柄上限 1024 触发 DataLoader ancillary-data 错误，运行已停止。将上限设为 65535 后完整评估成功，两个 GPU 随后均回到 12 MiB/0%。
+初次日志 console.log 保留，成功日志为 retry_nofile65535.console.log，成功 launcher PID 为 1467715，现已退出。
+
+评估目录为 `/root/zxy/experiments/orientfusion_v2_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32_seed0_20261112_211929_zPjIqO/test_best_stg2_20261114_003657`。其中 eval.pth 保存完整 COCO 数组，metrics.json 为精确指标，comparison.json 为与 E000 的精确比较，training_summary.json 为逐轮 AP 与训练汇总。summarize_results.py 可从原数组重算。
+
+查看指标和重算汇总可直接使用以下命令。
+
+```bash
+source /opt/miniconda3/etc/profile.d/conda.sh
+conda activate deim_zxy
+cd /root/zxy/deim
+export OUT=/root/zxy/experiments/orientfusion_v2_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32_seed0_20261112_211929_zPjIqO
+export EV="$OUT/test_best_stg2_20261114_003657"
+cat "$EV/metrics.json"
+cat "$EV/training_summary.json"
+tail -n 25 "$EV/retry_nofile65535.console.log"
+python "$EV/summarize_results.py"
+```
+
+独立重跑 test 时新建输出目录。
+
+```bash
+export REEVAL=$(mktemp -d "$OUT/test_recheck_XXXXXX")
+ulimit -Sn 65535
+nohup env CUDA_VISIBLE_DEVICES=4,5 PYTHONUNBUFFERED=1 \
+torchrun --standalone --nproc_per_node=2 train.py \
+  -c "$EV/resolved_test_config.yml" -r "$OUT/best_stg2.pth" \
+  --test-only --seed 0 --use-amp --output-dir "$REEVAL" \
+  --summary-dir "$REEVAL/summary" > "$REEVAL/console.log" 2>&1 < /dev/null &
+PID=$!
+printf '%s\n' "$PID" > "$REEVAL/launcher.pid"
+disown "$PID"
+tail -f "$REEVAL/console.log"
+```

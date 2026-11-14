@@ -45,7 +45,7 @@
 | E011 | RegionDense + MixUp（E009 上只把 MixUp 概率 0→0.5） | 0 | | | | | | | | | | | | | | | | 19.48M | | 暂缓，未运行（见 [val 拆解](sardet100k_region_dense_val_breakdown.md)） |
 | E012 | 只加方向增强（垂直翻转、90° 旋转），结构不变 | 0 | | | | | | | | | | | | | | | | | 19.48M | | 暂缓，未运行（D18 原始裁块结果不作为完整检测器结论） |
 | E013 | 方向共享编码与方向证据融合（v1 历史实现，原图 + 垂直翻转） | 0 | | | | | | | | | | | | | | | 19.58M | | 已实现，未运行；保留用于历史复现，正式实验转入 E013-v2 |
-| E013-v2 | 方向共享骨干与投影空间证据融合（原图 + 垂直翻转，单次 AIFI/FPN/PAN） | 0 | | | | | | | | | | | | | | | 19.58M | | 训练中（8 卡服务器 GPU 4、5，2026-11-12 21:19 启动；对照 E000） |
+| E013-v2 | 方向共享骨干与投影空间证据融合（原图 + 垂直翻转，单次 AIFI/FPN/PAN） | 0 | 35 | 67.26 | +1.97 | 94.53 | 72.86 | 61.91 | 78.73 | 71.50 | 74.41 | 73.75 | 62.57 | 71.20 | 58.24 | 53.27 | 84.55 | 19.58M | 27:25:26 | 晋级（val +1.97，test +2.35；seed 0） |
 | E015 | stride-4 精细层（极小目标分辨率；第三个方法候选） | 0 | | | | | | | | | | | | | | | | | 19.80M | 待启动（旧服务器 GPU 0、1；对照 E000-old 65.15；见 [D28–D29 与第三个方法](sardet100k_d28_d29_third_method.md)） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
@@ -63,6 +63,7 @@
 | E008 | 去掉 Dense O2O | 0 | best_stg2 | 63.32 | 91.10 | 67.11 | 60.97 | 75.25 | 71.49 | 70.72 | 73.41 | 49.61 | 71.79 | 56.61 | 46.98 | 81.50 |
 | E009 | RegionDense | 0 | best_stg2 | 63.43 | 90.96 | 67.57 | 61.94 | 75.17 | 68.39 | 70.92 | 73.80 | 49.16 | 72.13 | 56.29 | 47.31 | 81.87 |
 | E010 | RegionDenseSAR v2 | 0 | best_stg2 | 63.88 | 91.65 | 67.22 | 62.07 | 75.89 | 69.60 | 71.83 | 73.56 | 50.55 | 72.14 | 56.97 | 47.51 | 82.53 |
+| E013-v2 | 方向共享骨干与投影空间证据融合 | 0 | best_stg2 | 64.74 | 92.61 | 69.26 | 61.15 | 76.57 | 71.91 | 72.25 | 72.74 | 51.38 | 72.02 | 55.05 | 51.80 | 85.44 |
 
 E008、E009、E010 的 test 依用户明确要求评估；未用 test 选择 checkpoint 或调整配置。
 
@@ -86,7 +87,7 @@ E002 的 test 是淘汰决定之后按用户要求评估的，没有参与筛选
 | E009 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_36e_b32.yml` | `6e305c3` | `regiondense_deim_hgnetv2_m_sardet100k_region_dense_36e_b32_seed0_20261110_203618_BjgqFF` |
 | E010 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml` | `33172bb` | `regiondense_sar_v2_deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_seed0_20261111_214950_thYezk`（训练与 test 已完成，GPU 4、5） |
 | E011 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_mixup_36e_b32.yml` | 待提交 | 暂缓，未运行 |
-| E013-v2 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32.yml` | `5e90eb1` | `orientfusion_v2_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32_seed0_20261112_211929_zPjIqO`（GPU 4、5，训练中） |
+| E013-v2 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32.yml` | `5e90eb1` | `orientfusion_v2_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32_seed0_20261112_211929_zPjIqO`（训练及完整 test 已完成，GPU 4、5） |
 | E013 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_36e_b32.yml` | `c59bd6e` | v1 历史配置，未运行 |
 
 ## 备注
@@ -161,3 +162,9 @@ E008 val 65.86 / test 63.32；E009 val 66.12 / test 63.43。E009 相对 E008：v
 
 test AP 63.88，较 E008 +0.56，较 E009 +0.45；APs 62.07，较 E008 +1.09；APl 69.60，较 E009 +1.21，但仍比 E008 低 1.89。相对 E008 六类 test AP 均上涨。达到 E008 +0.5 val AP 筛选线，记录为晋级的辅助候选；当前为单种子，两项改动的独立贡献尚未分开。
 分类指标、实际评估目录和重跑命令见 [RegionDenseSAR 评估结果](sardet100k_region_dense_sar_results.md)；方法、CPU 验证、训练/恢复命令见 [正式实验](sardet100k_region_dense_sar_experiment.md)。
+
+### E013-v2 结果（2026-11-13）
+
+36 轮、global batch 32、seed 0。最高 val AP 为第 36 轮（index 35）的 67.26，较 E000 +1.97，按 val 选择 best_stg2 的 EMA 权重。完整 test AP 64.74，较 E000 +2.35；AP75 +2.91，APs +2.14。
+test 六类中 bridge +6.93、harbor +4.50、aircraft +1.57、tank +1.14、car +0.12、ship -0.16。val 的 aircraft 为 -0.22。通过既定 val 筛选线，保留为主方法候选，当前单种子。
+训练耗时 27:25:26，为 E000 的约 1.56 倍。逐轮 AP、精确指标、评估目录及重跑命令见 [E013-v2 完整记录](sardet100k_orientation_fusion_v2.md#36-轮训练与完整-test-结果)。
