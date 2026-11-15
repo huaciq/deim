@@ -1,6 +1,6 @@
 # E016 / RegionDenseSAR v3：保护区域驱动的非等分拼图
 
-状态：实现与功能验证阶段，尚未记录训练结果。正式运行按用户授权使用新服务器 GPU 4、5；启动前检查这两张卡是否空闲。本实验独立评价 v3，未叠加 E013-v2 等模型改动。
+状态：36 轮训练与完整 test 评估已完成。使用新服务器 GPU 4、5，训练代码 `29978bc`，训练耗时 17:29:55；最高 val AP 66.33（index 35），对应 best_stg2 的 EMA 权重在官方 test 11,613 张图上取得 AP 64.12、APs 61.78、APl 71.61。相对 E008：val +0.47、test +0.80；相对 E010：val −0.12、test +0.24、test APl +2.01。完整结果与判读见 [E016 评估记录](sardet100k_region_dense_adaptive_results.md)。本实验独立评价 v3，未叠加 E013-v2 等模型改动。
 
 ## 相对 E010 改了什么
 
@@ -105,7 +105,7 @@ bash tools/run_sar_module_experiment.sh "$CFG"
 
 ```bash
 conda activate deim_zxy
-export OUT=/root/zxy/experiments/REPLACE_WITH_ACTUAL_V3_RUN
+export OUT=/root/zxy/experiments/regiondense_sar_v3_deim_hgnetv2_m_sardet100k_region_dense_adaptive_36e_b32_seed0_20261114_114231_Hmbuun
 tail -f "$OUT/console.log"
 nvidia-smi -i 4,5
 ps -p "$(cat "$OUT/launcher.pid")" -o pid,etime,args
