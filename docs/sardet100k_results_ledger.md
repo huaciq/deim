@@ -48,6 +48,7 @@
 | E013-v2 | 方向共享骨干与投影空间证据融合（原图 + 垂直翻转，单次 AIFI/FPN/PAN） | 0 | 35 | 67.26 | +1.97 | 94.53 | 72.86 | 61.91 | 78.73 | 71.50 | 74.41 | 73.75 | 62.57 | 71.20 | 58.24 | 53.27 | 84.55 | 19.58M | 27:25:26 | 晋级（val +1.97，test +2.35；seed 0） |
 | E015 | stride-4 精细层（极小目标分辨率；第三个方法候选） | 0 | | | | | | | | | | | | | | | | | 19.80M | 待启动（旧服务器 GPU 0、1；对照 E000-old 65.15；见 [D28–D29 与第三个方法](sardet100k_d28_d29_third_method.md)） |
 | E016 | RegionDenseSAR v3：固定布局失败后的非等分拼图 | 0 | 35 | 66.33 | +1.04 | 93.46 | 71.22 | 62.13 | 78.01 | 72.64 | 73.46 | 75.30 | 62.85 | 71.18 | 59.94 | 48.87 | 79.86 | 19.48M | 17:29:55 | 完成（对 E008 val +0.47/test +0.80；目标未全部达到） |
+| E017 | 完整模型：E013-v2 方向融合 + E016 RegionDenseSAR v3 | 0 | | | | | | | | | | | | | | | | 19.58M | | 训练中（GPU 4、5；对照 E013-v2/E016，见 [E017](sardet100k_full_model_e017.md)） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -92,6 +93,7 @@ E002 的 test 是淘汰决定之后按用户要求评估的，没有参与筛选
 | E013-v2 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32.yml` | `5e90eb1` | `orientfusion_v2_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_36e_b32_seed0_20261112_211929_zPjIqO`（训练及完整 test 已完成，GPU 4、5） |
 | E013 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_36e_b32.yml` | `c59bd6e` | v1 历史配置，未运行 |
 | E016 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_adaptive_36e_b32.yml` | `29978bc` | `regiondense_sar_v3_deim_hgnetv2_m_sardet100k_region_dense_adaptive_36e_b32_seed0_20261114_114231_Hmbuun`（训练与完整 test 已完成，GPU 4、5；评估目录 `test_eval_selected_CH4QSr/`，见 [E016 结果](sardet100k_region_dense_adaptive_results.md)） |
+| E017 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32.yml` | `31b3eb0` | `fullmodel_e017_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32_seed0_20261115_135344_kTy9zD`（GPU 4、5 训练中，2026-11-15 启动；代码经 git bundle 同步，GitHub 在服务器上超时） |
 
 ## 备注
 
