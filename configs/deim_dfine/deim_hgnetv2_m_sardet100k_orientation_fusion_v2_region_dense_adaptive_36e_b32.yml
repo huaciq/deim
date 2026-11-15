@@ -1,0 +1,18 @@
+# E017: full model = E013-v2 orientation fusion (main) + E016 RegionDenseSAR v3 (auxiliary).
+# Equals E016 plus E013-v2's DEIM.orientation_fusion block; everything else (E000 36-epoch protocol,
+# COCO-M initialisation, Mosaic/MixUp off, v3 plan) unchanged. GPU 4,5, global batch 32.
+__include__: ['./deim_hgnetv2_m_sardet100k_region_dense_adaptive_36e_b32.yml']
+
+experiment_protocol_document: docs/sardet100k_full_model_e017.md
+output_dir: /root/zxy/experiments/deim_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32/seed0
+
+DEIM:
+  orientation_fusion:
+    stage: projected
+    views: ['vflip']
+    hidden_dim: 256
+    num_levels: 3
+    groups: 8
+    reduction: 4
+    init_bias: 2.0
+    checkpoint_views: True
