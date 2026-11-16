@@ -1,5 +1,10 @@
 """E013-v2: align and fuse projected orientation evidence before one encoder body.
 
+The second view is a vertical flip (E013-v2, E017) or, as the E018 control, a
+horizontal flip. Training already applies random horizontal flips, so the E018
+view is nearly redundant with the image itself; it isolates what a second view
+gives without new up-down orientation evidence. Everything else is identical.
+
 The two views share HGNetv2 and the existing 1x1 projections. AIFI and FPN/PAN
 operate once in the original image frame. This retains orientation-dependent
 responses without imposing flip invariance or duplicating cross-scale mixing.
@@ -16,6 +21,10 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from .orientation_fusion import OrientationSharedFusion
+
+# The calibrated shifts (3 px, 1 cell) hold along both axes: the stem pads
+# right and bottom alike; tests/test_orientation_fusion.py checks both flips.
+PROJECTED_VIEWS = ('vflip', 'hflip')
 
 
 @contextmanager
@@ -48,11 +57,13 @@ def preserve_batchnorm_buffers(modules):
 class ProjectedOrientationFusion(OrientationSharedFusion):
     def __init__(self, views=('vflip',), hidden_dim=256, num_levels=3, groups=8,
                  reduction=4, init_bias=2., checkpoint_views=True):
-        if tuple(views) != ('vflip',):
-            raise ValueError('E013-v2 uses the original image and one vertical-flip view')
+        views = tuple(views)
+        if len(views) != 1 or views[0] not in PROJECTED_VIEWS:
+            raise ValueError(f'Projected fusion uses the original image and one view from {PROJECTED_VIEWS}, got {list(views)}')
         super().__init__(views=views, hidden_dim=hidden_dim, num_levels=num_levels,
                          groups=groups, reduction=reduction, init_bias=init_bias,
                          image_shift=3, cell_shift=1, checkpoint_views=checkpoint_views)
+        self.view_name = views[0]
         self.last_metrics = {}
 
     def _contexts(self, modules):
@@ -61,7 +72,7 @@ class ProjectedOrientationFusion(OrientationSharedFusion):
     @torch.no_grad()
     def _record_weights(self, weight, level, targets):
         # These are descriptive diagnostics, not an acceptance threshold.
-        name = f'orientation_vflip_p{level + 3}'
+        name = f'orientation_{self.view_name}_p{level + 3}'
         self.last_metrics[name] = weight[:, 1].float().mean()
         if targets is not None:
             h, w = weight.shape[-2:]
@@ -87,7 +98,7 @@ class ProjectedOrientationFusion(OrientationSharedFusion):
             return tuple(encode(view))
 
         per_view = []
-        for view in (images, self.view(images, 'vflip')):
+        for view in (images, self.view(images, self.view_name)):
             if self.checkpoint_views and self.training and torch.is_grad_enabled():
                 if not checkpoint_modules:
                     raise ValueError('Pass the encoded modules to preserve their BN state on recomputation')
@@ -102,12 +113,12 @@ class ProjectedOrientationFusion(OrientationSharedFusion):
         self.last_metrics = {}
         for level, gate in enumerate(self.gates):
             original, turned = per_view[0][level], per_view[1][level]
-            aligned = self.align(turned, 'vflip')
+            aligned = self.align(turned, self.view_name)
             b, c, h, w = original.shape
-            # Mask the artificial row created by the feature-grid correction.
+            # Mask the artificial row (vflip) or column (hflip) created by the feature-grid correction.
             # This is support validity, not a claim that border receptive fields
             # are unaffected by the ordinary padding of the backbone.
-            valid_flip = self.align(turned.new_ones((1, 1, h, w)), 'vflip').bool()
+            valid_flip = self.align(turned.new_ones((1, 1, h, w)), self.view_name).bool()
             valid = torch.stack((torch.ones_like(valid_flip), valid_flip), dim=1)
             valid = valid.view(1, 2, 1, 1, h, w)
             logits = gate(torch.cat((original, aligned), dim=1))
