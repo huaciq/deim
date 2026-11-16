@@ -49,6 +49,7 @@
 | E015 | stride-4 精细层（极小目标分辨率；第三个方法候选） | 0 | | | | | | | | | | | | | | | | | 19.80M | 待启动（旧服务器 GPU 0、1；对照 E000-old 65.15；见 [D28–D29 与第三个方法](sardet100k_d28_d29_third_method.md)） |
 | E016 | RegionDenseSAR v3：固定布局失败后的非等分拼图 | 0 | 35 | 66.33 | +1.04 | 93.46 | 71.22 | 62.13 | 78.01 | 72.64 | 73.46 | 75.30 | 62.85 | 71.18 | 59.94 | 48.87 | 79.86 | 19.48M | 17:29:55 | 完成（对 E008 val +0.47/test +0.80；目标未全部达到） |
 | E017 | 完整模型：E013-v2 方向融合 + E016 RegionDenseSAR v3 | 0 | 32 | 68.81 | +3.52 | 95.25 | 73.91 | 64.24 | 80.39 | 73.82 | 75.35 | 75.15 | 63.42 | 71.54 | 60.37 | 54.79 | 87.59 | 19.58M | 27:46:22 | 完整模型（对 E013-v2 val +1.55/test +1.10，对 E016 val +2.48/test +1.72；见 [E017](sardet100k_full_model_e017.md)） |
+| E018 | E013-v2 对照：第二视图改为水平翻转，其余不变 | 0 | | | | | | | | | | | | | | | | 19.58M | | 训练中（GPU 4、5；对照 E013-v2/E000，判读标准见 [E018](sardet100k_e018_hflip_view_control.md)） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -95,6 +96,7 @@ E002 的 test 是淘汰决定之后按用户要求评估的，没有参与筛选
 | E013 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_36e_b32.yml` | `c59bd6e` | v1 历史配置，未运行 |
 | E016 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_adaptive_36e_b32.yml` | `29978bc` | `regiondense_sar_v3_deim_hgnetv2_m_sardet100k_region_dense_adaptive_36e_b32_seed0_20261114_114231_Hmbuun`（训练与完整 test 已完成，GPU 4、5；评估目录 `test_eval_selected_CH4QSr/`，见 [E016 结果](sardet100k_region_dense_adaptive_results.md)） |
 | E017 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32.yml` | `31b3eb0` | `fullmodel_e017_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32_seed0_20261115_135344_kTy9zD`（训练与完整 test 已完成，GPU 4、5；代码经 git bundle 同步；评估目录 `test_eval_selected_tH1Kds/`，val 重评 `val_eval_selected_D9KIMj/`） |
+| E018 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_hflip_view_36e_b32.yml` | `2dd42de` | `hflipview_e018_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_hflip_view_36e_b32_seed0_20261116_180625_zwdEuU`（GPU 4、5 训练中，2026-11-16 启动） |
 
 ## 备注
 

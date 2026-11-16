@@ -101,3 +101,15 @@ GPU_IDS=4,5 bash tools/run_sar_module_experiment.sh --resume "$OUT"
 
 训练结束后按 val 选权重并评估 test：选择规则和命令与 [E017](sardet100k_full_model_e017.md) 相同（`best_stg1` / `best_stg2` 中按 log.txt 的最高 val AP 对应的那个），
 test 图像 `/root/zxy/TCRA-SAR/datasets/SARDet_100K/JPEGImages/test`，标注 `/root/zxy/TCRA-SAR/datasets/SARDet_100K/Annotations/test.json`。
+
+## 启动记录
+
+2026-11-16 18:06（服务器时间）在 8 卡服务器 GPU 4、5 启动，代码 `2dd42de`（服务器直接从 GitHub 快进成功）。启动前服务器上
+`tests.test_orientation_fusion_v2_hflip` 与 `tests.test_orientation_fusion_v2` 共 10 项通过。launcher PID `964990`，运行目录：
+
+```bash
+export OUT=/root/zxy/experiments/hflipview_e018_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_hflip_view_36e_b32_seed0_20261116_180625_zwdEuU
+```
+
+第 0 轮第 600 步：每步约 0.92 s（E013-v2 为 0.84 s），峰值显存每卡 9.5 GB，无报错。载入 COCO 权重时缺失的只有新增门控参数和
+`decoder.denoising_class_embed.weight`，与 E013-v2 相同。前 600 步水平翻转分支的平均门控权重为 11–12%（初始 11.9%）。
