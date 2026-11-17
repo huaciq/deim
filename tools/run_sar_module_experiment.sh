@@ -3,6 +3,8 @@
 # Usage: bash tools/run_sar_module_experiment.sh CONFIG
 #        bash tools/run_sar_module_experiment.sh --resume RUN
 # Optional new-run settings: EXPERIMENT_ROOT, INITIAL_WEIGHTS and RUN_PREFIX.
+# INITIAL_WEIGHTS=none starts without a detector checkpoint (no -t); the config must then set
+# HGNetv2.pretrained: True and a local_model_dir holding PPHGNetV2_<name>_stage1.pth (ImageNet backbone).
 # Optional for both modes: GPU_IDS, comma-separated physical GPUs (default 0,1).
 set -e
 GPU_IDS=${GPU_IDS:-0,1}
@@ -78,6 +80,13 @@ if mode == 'new':
         (run / 'dataset_stats.json').write_text(stats.read_text(), encoding='utf-8')
 elif not Path(os.environ['INITIAL']).is_file():
     raise FileNotFoundError('Resume requires the stopped run\'s last.pth: ' + os.environ['INITIAL'])
+if mode == 'new' and os.environ['INITIAL'] == 'none':
+    backbone = cfg.get('HGNetv2', {})
+    stage1 = Path(str(backbone.get('local_model_dir', ''))) / ('PPHGNetV2_' + backbone.get('name', 'B2') + '_stage1.pth')
+    if not backbone.get('pretrained') or not stage1.is_file():
+        raise FileNotFoundError('INITIAL_WEIGHTS=none needs HGNetv2.pretrained: True and ' + str(stage1))
+elif mode == 'new' and not Path(os.environ['INITIAL']).is_file():
+    raise FileNotFoundError('Initial detector weights not found: ' + os.environ['INITIAL'])
 
 train = cfg['train_dataloader']
 collate = train.get('collate_fn', {})
@@ -142,7 +151,11 @@ metadata = dict(
     ema=dict(enabled=cfg.get('use_ema'), settings=cfg.get('ema', {})),
     amp=dict(enabled=cfg.get('use_amp'), dtype=cfg.get('amp_dtype'),
              fp32_loss=cfg.get('amp_loss_fp32'), fp32_retry=cfg.get('amp_fp32_retry'), scaler=cfg.get('scaler', {})),
-    initialization=os.environ['INITIAL'], initialization_mode='COCO tuning -t; fresh optimizer' if mode == 'new' else 'restore -r from saved configuration and last.pth',
+    initialization=(os.environ['INITIAL'] if os.environ['INITIAL'] != 'none' else
+                    str(Path(str(cfg['HGNetv2']['local_model_dir'])) / ('PPHGNetV2_' + cfg['HGNetv2'].get('name', 'B2') + '_stage1.pth'))),
+    initialization_mode=('restore -r from saved configuration and last.pth' if mode != 'new' else
+                         'ImageNet HGNetv2 stage1 backbone only (no -t); encoder/decoder from scratch; fresh optimizer'
+                         if os.environ['INITIAL'] == 'none' else 'COCO tuning -t; fresh optimizer'),
     training_only_loss_weights={k:v for k,v in criterion.get('weight_dict', {}).items() if k.startswith(('loss_scs', 'loss_mpq', 'loss_margin', 'loss_asym_box', 'loss_wfdr', 'loss_bccq'))},
     wfdr_settings={k:v for k,v in criterion.items() if k.startswith('wfdr_') or k == 'use_wfdr'},
     bccq_settings=(dict(
@@ -264,7 +277,8 @@ cfg = yaml.safe_load((Path(os.environ['OUT']) / 'resolved_config.yml').read_text
 arguments = [
     'torchrun', '--standalone', '--nproc_per_node=' + str(len(os.environ['GPU_IDS'].split(','))), 'train.py',
     '-c', str(Path(os.environ['OUT']) / 'resolved_config.yml'),
-    '-t' if os.environ['MODE'] == 'new' else '-r', os.environ['INITIAL'],
+] + ([] if os.environ['MODE'] == 'new' and os.environ['INITIAL'] == 'none' else
+      ['-t' if os.environ['MODE'] == 'new' else '-r', os.environ['INITIAL']]) + [
     '--seed', str(cfg.get('seed', 0)), '--use-amp',
     '--output-dir', os.environ['OUT'], '--summary-dir', str(Path(os.environ['OUT']) / 'summary'),
 ]

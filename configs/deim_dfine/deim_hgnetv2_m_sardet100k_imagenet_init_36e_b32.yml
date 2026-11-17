@@ -1,0 +1,13 @@
+# E019: E000 with ImageNet initialisation instead of the DEIM COCO detector checkpoint.
+# Only the HGNetv2-B2 backbone starts from the ImageNet stage1 weights (PPHGNetV2_B2_stage1.pth, the
+# same weights DEIM/D-FINE start their COCO training from); encoder and decoder start from scratch.
+# Launch with INITIAL_WEIGHTS=none (no -t). Everything else is E000's 36-epoch protocol.
+# GPU 4,5 on the eight-GPU server (same server as E000), global batch 32 (16 images/rank).
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop.yml']
+
+experiment_protocol_document: docs/sardet100k_e019_imagenet_init.md
+output_dir: /root/zxy/experiments/deim_m_sardet100k_imagenet_init_36e_b32/seed0
+
+HGNetv2:
+  pretrained: True
+  local_model_dir: /root/zxy/pretrain/hgnetv2/
