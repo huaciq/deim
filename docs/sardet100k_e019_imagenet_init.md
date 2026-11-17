@@ -72,3 +72,17 @@ GPU_IDS=4,5 bash tools/run_sar_module_experiment.sh --resume "$OUT"
 ```
 
 恢复时用 `-r last.pth`，构建模型时仍会先读入 stage1 骨干，再被 checkpoint 覆盖，不影响结果。
+
+## 启动记录
+
+2026-11-17 23:40（服务器时间）在 8 卡服务器 GPU 4、5 启动，代码 `1ada691`（服务器连不上 GitHub，经 git bundle 快进，提交号与 GitHub 一致）。
+启动前服务器上 `tests.test_imagenet_init_e019` 通过；stage1 文件为 382 个张量的 state_dict。launcher PID `2759406`，运行目录：
+
+```bash
+export OUT=/root/zxy/experiments/imagenet_e019_deim_hgnetv2_m_sardet100k_imagenet_init_36e_b32_seed0_20261117_234029_hGExcb
+```
+
+`start_command.sh` 中没有 `-t`；`run_metadata.json` 记录 initialization 为 `/root/zxy/pretrain/hgnetv2/PPHGNetV2_B2_stage1.pth`，
+模式为 "ImageNet HGNetv2 stage1 backbone only (no -t); encoder/decoder from scratch; fresh optimizer"。
+日志有 `Loaded stage1 B2 HGNetV2 from local file.`（只在 rank 0 打印；两个进程读同一本地文件）。
+第 0 轮第 100 步：每步约 0.55 s，峰值显存每卡 14.8 GB，与 E000 相同，无报错。
