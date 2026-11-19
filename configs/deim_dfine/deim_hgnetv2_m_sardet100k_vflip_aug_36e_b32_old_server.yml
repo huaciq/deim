@@ -1,0 +1,24 @@
+# E020 control for E013-v2 (old server): E000-old plus random VERTICAL flip augmentation (p=0.5), nothing else.
+# E013-v2 feeds a vertical-flip view through the network at train and test time; E020 only shows vertical flips
+# as training augmentation, with an unchanged single-view detector and inference. Compare with E000-old only
+# (same server, val AP 65.15): /data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_seed0_20261107_083221_byTPNu
+# Old server GPUs 0,1, global batch 32 (16 images/rank). The ops list is restated because YAML lists are replaced,
+# not merged; it equals E000's list with RandomVerticalFlip inserted right after RandomHorizontalFlip.
+__include__: ['./deim_hgnetv2_m_sardet100k_36e_b32_nozoom_nocrop_old_server.yml']
+
+experiment_protocol_document: docs/sardet100k_e020_vflip_aug_control.md
+output_dir: /data2/zxy/sar/experiments/deim_m_sardet100k_vflip_aug_36e_b32_old_server/seed0
+
+train_dataloader:
+  dataset:
+    transforms:
+      ops:
+        - {type: Mosaic, output_size: 320, rotation_range: 10, translation_range: [0.1, 0.1], scaling_range: [0.5, 1.5], probability: 1.0, fill_value: 0, use_cache: False, max_cached_images: 50, random_pop: True}
+        - {type: RandomPhotometricDistort, p: 0.5}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: RandomHorizontalFlip}
+        - {type: RandomVerticalFlip}
+        - {type: Resize, size: [640, 640]}
+        - {type: SanitizeBoundingBoxes, min_size: 1}
+        - {type: ConvertPILImage, dtype: 'float32', scale: True}
+        - {type: ConvertBoxes, fmt: 'cxcywh', normalize: True}

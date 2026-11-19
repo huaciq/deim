@@ -43,7 +43,7 @@
 | E009 | RegionDense 保尺度区域拼图 | 0 | 35 | 66.12 | +0.83 | 93.62 | 70.76 | 62.18 | 77.74 | 70.62 | 73.00 | 75.39 | 62.23 | 71.51 | 59.09 | 48.73 | 79.77 | 19.48M | 17:54:10 | 未晋级（相对 E008 val +0.26） |
 | E010 | RegionDenseSAR v2 背景相容与源图遍历 | 0 | 35 | 66.45 | +1.16 | 93.72 | 71.08 | 62.89 | 78.16 | 71.37 | 73.91 | 75.37 | 62.77 | 70.44 | 59.46 | 49.13 | 81.55 | 19.48M | 17:33:40 | 晋级（对 E008 val +0.59；辅助候选） |
 | E011 | RegionDense + MixUp（E009 上只把 MixUp 概率 0→0.5） | 0 | | | | | | | | | | | | | | | | 19.48M | | 暂缓，未运行（见 [val 拆解](sardet100k_region_dense_val_breakdown.md)） |
-| E012 | 只加方向增强（垂直翻转、90° 旋转），结构不变 | 0 | | | | | | | | | | | | | | | | | 19.48M | | 暂缓，未运行（D18 原始裁块结果不作为完整检测器结论） |
+| E012 | 只加方向增强（垂直翻转、90° 旋转），结构不变 | 0 | | | | | | | | | | | | | | | | | 19.48M | | 未运行；由只含垂直翻转的 E020 取代（与 OCEF 的视图一致） |
 | E013 | 方向共享编码与方向证据融合（v1 历史实现，原图 + 垂直翻转） | 0 | | | | | | | | | | | | | | | 19.58M | | 已实现，未运行；保留用于历史复现，正式实验转入 E013-v2 |
 | E013-v2 | 方向共享骨干与投影空间证据融合（原图 + 垂直翻转，单次 AIFI/FPN/PAN） | 0 | 35 | 67.26 | +1.97 | 94.53 | 72.86 | 61.91 | 78.73 | 71.50 | 74.41 | 73.75 | 62.57 | 71.20 | 58.24 | 53.27 | 84.55 | 19.58M | 27:25:26 | 晋级（val +1.97，test +2.35；seed 0） |
 | E015 | stride-4 精细层（极小目标分辨率；第三个方法候选） | 0 | | | | | | | | | | | | | | | | | 19.80M | 待启动（旧服务器 GPU 0、1；对照 E000-old 65.15；见 [D28–D29 与第三个方法](sardet100k_d28_d29_third_method.md)） |
@@ -51,6 +51,7 @@
 | E017 | 完整模型：E013-v2 方向融合 + E016 RegionDenseSAR v3 | 0 | 32 | 68.81 | +3.52 | 95.25 | 73.91 | 64.24 | 80.39 | 73.82 | 75.35 | 75.15 | 63.42 | 71.54 | 60.37 | 54.79 | 87.59 | 19.58M | 27:46:22 | 完整模型（对 E013-v2 val +1.55/test +1.10，对 E016 val +2.48/test +1.72；见 [E017](sardet100k_full_model_e017.md)） |
 | E018 | E013-v2 对照：第二视图改为水平翻转，其余不变 | 0 | 35 | 65.48 | +0.19 | 93.06 | 70.39 | 60.30 | 77.35 | 70.68 | 73.54 | 74.52 | 62.09 | 71.83 | 57.84 | 47.09 | 79.53 | 19.58M | 27:33:37 | 机制对照完成：r_val 0.10、r_test 0.18（≤0.3），E013-v2 增益来自垂直视图；见 [E018](sardet100k_e018_hflip_view_control.md) |
 | E019 | ImageNet 初始化基线（只用 HGNetv2-B2 stage1 骨干，不加 -t） | 0 | 35 | 64.11 | −1.18 | 92.41 | 69.14 | 58.78 | 75.59 | 69.12 | 72.58 | 73.05 | 61.86 | 71.02 | 56.54 | 45.06 | 77.11 | 19.48M | 17:39:05 | 完成（COCO 检测初始化贡献 val 1.18 / test 1.02；APl 差最大；见 [E019](sardet100k_e019_imagenet_init.md)） |
+| E020 | E013-v2 对照：只加随机垂直翻转增强（旧服务器） | 0 | | | | | | | | | | | | | | | | 19.48M | | 待启动（旧服务器 GPU 0、1；只与 E000-old 65.15 比较，判读标准见 [E020](sardet100k_e020_vflip_aug_control.md)） |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -101,6 +102,7 @@ E002 的 test 是淘汰决定之后按用户要求评估的，没有参与筛选
 | E017 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32.yml` | `31b3eb0` | `fullmodel_e017_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32_seed0_20261115_135344_kTy9zD`（训练与完整 test 已完成，GPU 4、5；代码经 git bundle 同步；评估目录 `test_eval_selected_tH1Kds/`，val 重评 `val_eval_selected_D9KIMj/`） |
 | E018 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_hflip_view_36e_b32.yml` | `2dd42de` | `hflipview_e018_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_hflip_view_36e_b32_seed0_20261116_180625_zwdEuU`（训练与完整 test 已完成，GPU 4、5；评估目录 `test_eval_selected_PrwPou/`） |
 | E019 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_imagenet_init_36e_b32.yml` | `1ada691` | `imagenet_e019_deim_hgnetv2_m_sardet100k_imagenet_init_36e_b32_seed0_20261117_234029_hGExcb`（训练与完整 test 已完成，GPU 4、5，`INITIAL_WEIGHTS=none`；评估目录 `test_eval_selected_29fujN/`） |
+| E020 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_vflip_aug_36e_b32_old_server.yml` | 见运行目录 `git_revision.txt` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_vflip_aug_36e_b32_old_server_seed0_*`（待用户启动） |
 
 ## 备注
 

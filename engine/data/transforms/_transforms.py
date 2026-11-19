@@ -27,6 +27,7 @@ torchvision.disable_beta_transforms_warning()
 RandomPhotometricDistort = register()(T.RandomPhotometricDistort)
 RandomZoomOut = register()(T.RandomZoomOut)
 RandomHorizontalFlip = register()(T.RandomHorizontalFlip)
+RandomVerticalFlip = register()(T.RandomVerticalFlip)  # SARDet-100K E020 control only
 Resize = register()(T.Resize)
 # ToImageTensor = register()(T.ToImageTensor)
 # ConvertDtype = register()(T.ConvertDtype)
