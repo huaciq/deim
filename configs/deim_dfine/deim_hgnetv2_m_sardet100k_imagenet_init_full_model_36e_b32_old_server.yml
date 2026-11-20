@@ -1,0 +1,22 @@
+# E021 on the old server (GPUs 0,1): the full model (E017) with ImageNet initialisation. Only data paths, the
+# rebuilt v3 plan directory, the ImageNet backbone directory and the output directory differ from
+# deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32.yml. Launch with INITIAL_WEIGHTS=none (no -t).
+# Also the --config for rebuilding the v3 plan on the old server (base: the rebuilt v2 plan).
+__include__: ['./deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32.yml']
+
+experiment_protocol_document: docs/sardet100k_e021_imagenet_init_full_model.md
+output_dir: /data2/zxy/sar/experiments/deim_m_sardet100k_imagenet_init_full_model_36e_b32_old_server/seed0
+
+HGNetv2:
+  local_model_dir: /home/zxy/sar/pretrain/hgnetv2/
+
+train_dataloader:
+  dataset:
+    img_folder: /data2/zxy/sar/datasets/SARDet_100K/JPEGImages/train
+    ann_file: /data2/zxy/sar/datasets/SARDet_100K/Annotations/train.json
+    plan_dir: /data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v3_seed0_b32
+
+val_dataloader:
+  dataset:
+    img_folder: /data2/zxy/sar/datasets/SARDet_100K/JPEGImages/val
+    ann_file: /data2/zxy/sar/datasets/SARDet_100K/Annotations/val.json

@@ -23,9 +23,10 @@ E019 显示，在 36 轮协议下 COCO 检测初始化只比 ImageNet 骨干初�
 
 ## 放在哪台服务器
 
-放在 8 卡服务器 GPU 4、5：E000、E017、E019 都在这台服务器上，表中四个数字同服务器；v3 计划也只在这台服务器上生成过。
-放到旧服务器则需要先在旧服务器上重新生成 v2 和 v3 拼图计划，并补跑一次 ImageNet 基线（E019-old，约 16 小时），
-否则 E021 − E019 是跨服务器的差值。
+原计划放在 8 卡服务器 GPU 4、5（与 E000、E017、E019 同服务器）。2026-11-19 用户决定：GPU 4、5 另有用途，
+**E021 改在旧服务器 GPU 0、1 运行**，在旧服务器上重建 v2、v3 拼图计划，不补跑 ImageNet 基线。
+因此 E021 − E019 是跨服务器的差值；两台服务器同一基线相差约 0.1–0.4 AP（E000 / E000-old），判读时把这一量级考虑在内。
+旧服务器的配置、计划重建和命令见文末"旧服务器版本"。
 
 ## 协议
 
@@ -91,3 +92,129 @@ GPU_IDS=4,5 bash tools/run_sar_module_experiment.sh --resume "$OUT"
 
 训练结束后按 val 选权重并评估 test，命令与 [E017](sardet100k_full_model_e017.md) 相同；对比可用
 `tools/sardet100k/compare_runs.py`（`--run E019=... --run E021=...`）。
+
+## 旧服务器版本（实际运行）
+
+### 配置
+
+| 文件 | 用途 | 相对 8 卡服务器版本的差别 |
+|---|---|---|
+| `configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_old_server.yml` | 重建 v2 计划（E010 的计划，v3 的基础） | 只改 train/val 数据路径、`plan_dir`、输出目录 |
+| `configs/deim_dfine/deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32_old_server.yml` | 重建 v3 计划，并训练 E021 | 只改 train/val 数据路径、`plan_dir`、`HGNetv2.local_model_dir: /home/zxy/sar/pretrain/hgnetv2/`、输出目录 |
+
+数据：`/data2/zxy/sar/datasets/SARDet_100K`（与 E000-old 相同）。计划目录：
+`/data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_{v2,v3}_seed0_b32`（v3 约 4.7 GB）。
+
+定向测试 `tests/test_e021_old_server.py`：两份配置相对 8 卡服务器版本只有路径不同；数据路径与 E000-old 相同；
+v2 计划设置等于 v3 设置去掉 `adaptive_partition`（v3 构建脚本要求这一点）；`tools/sardet100k/plan_summary.py` 读数正确。
+本地与 E021 配置测试共 7 项通过。
+
+### 计划重建与核对
+
+两套计划都只读 train 标注和图像，按 seed 0 生成，与 8 卡服务器使用同一代码。8 卡服务器上 v3 构建用时约 9 分钟（特征 432 s）。
+构建完成后用 `tools/sardet100k/plan_summary.py` 打印统计，与 8 卡服务器的参考值逐项对照：
+
+| 项目 | v2 参考值 | v3 参考值 |
+|---|---|---|
+| source_images / canvases_per_epoch / steps_per_epoch | 94493 / 94464 / 2952 | 94493 / 94464 / 2952 |
+| completed_source_passes / every_pass_complete | 23 / true | 26 / true |
+| remaining_pass_sources_used | 64142 | 10599 |
+| total_source_exposures | 2237481 | 2467417 |
+| instance_exposure | [23, 24] | [26, 27] |
+| total_class_counts | [2210272, 964111, 226676, 571376, 653754, 78278] | [2437545, 1062059, 249770, 630799, 721017, 86359] |
+| feature_selection_fallbacks | 0 | 0（adaptive 也为 0） |
+| first_epoch_routes | {"-1": 70501, "0": 10732, "1": 6466, "2": 6765} | {"-1": 52005, "0": 8664, "1": 6263, "2": 6448, "3": 10825, "4": 10259} |
+| first_epoch_gt / last_epoch_gt | 293489 / 294782 | 324647 / 324744 |
+| feature_valid_regions | 148356 | — |
+
+读法：前两行与 settings 只由标注和设置决定，必须一致。其余项取决于背景特征，图像解码完全相同时也应一致；
+若只有这些项略有差别，说明两台机器的 JPEG 解码有细微差异，计划仍是同一算法生成的有效 v3 计划，照常训练并在结果中注明。
+
+### 旧服务器命令
+
+更新代码并检查：
+
+```bash
+cd /home/zxy/sar/repos/deim
+conda activate deim_zxy
+git status --short --branch
+git fetch origin
+git switch main
+git -c pull.rebase=false pull --ff-only origin main
+git log --oneline -1
+python -m unittest tests.test_e021_old_server tests.test_imagenet_init_full_model_e021 -v
+ls -l /home/zxy/sar/pretrain/hgnetv2/PPHGNetV2_B2_stage1.pth
+df -h /data2
+```
+
+重建 v2、v3 计划（只用 CPU，后台顺序执行；计划目录已存在时脚本报错退出，不会覆盖）：
+
+```bash
+mkdir -p /data2/zxy/sar/experiments/diagnostics
+export PREP=$(mktemp -d /data2/zxy/sar/experiments/diagnostics/region_dense_plans_old_server_XXXXXX)
+nohup env CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 PYTHONUNBUFFERED=1 bash -c '
+python tools/build_region_dense_sar.py --config configs/deim_dfine/deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32_old_server.yml --workers 8 --world-size 2 &&
+python tools/build_region_dense_adaptive.py --config configs/deim_dfine/deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32_old_server.yml --base-plan-dir /data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v2_seed0_b32 --workers 8 --world-size 2
+' > "$PREP/build.log" 2>&1 < /dev/null &
+PID=$!
+printf '%s\n' "$PID" > "$PREP/build.pid"
+disown "$PID"
+tail -f "$PREP/build.log"
+```
+
+日志最后一行是 `Prepared /data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v3_seed0_b32; total elapsed ...` 即完成。打印两套计划的统计：
+
+```bash
+python tools/sardet100k/plan_summary.py --plan-dir /data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v2_seed0_b32
+python tools/sardet100k/plan_summary.py --plan-dir /data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v3_seed0_b32
+```
+
+启动 E021（不加 `-t`；脚本只在 GPU 0、1 空闲时启动，nohup 后保存 PID 并 disown）：
+
+```bash
+GPU_IDS=0,1 EXPERIMENT_ROOT=/data2/zxy/sar/experiments INITIAL_WEIGHTS=none RUN_PREFIX=deim_m_sardet100k \
+  bash tools/run_sar_module_experiment.sh configs/deim_dfine/deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32_old_server.yml
+export OUT=/data2/zxy/sar/experiments/<STARTED 行里的目录>
+grep -c "Loaded stage1 B2 HGNetV2 from local file" "$OUT/console.log"
+tail -1 "$OUT/start_command.sh"
+```
+
+`start_command.sh` 里不应有 `-t`。监控（重连后先 `cd /home/zxy/sar/repos/deim && conda activate deim_zxy` 并重新设置 OUT）：
+
+```bash
+tail -f "$OUT/console.log"
+```
+
+```bash
+nvidia-smi -i 0,1; ps -p "$(cat "$OUT/launcher.pid")" -o pid,etime,args
+```
+
+```bash
+python -c 'import json,os; [print(r["epoch"]+1, [round(100*x,2) for x in r["test_coco_eval_bbox"][:6]]) for r in map(json.loads, filter(str.strip, open(os.environ["OUT"]+"/log.txt")))]'
+```
+
+```bash
+tensorboard --logdir "$OUT/summary" --host 127.0.0.1 --port 6006
+```
+
+中断后恢复（`-r last.pth`，不与 `-t` 同时使用）：
+
+```bash
+GPU_IDS=0,1 bash tools/run_sar_module_experiment.sh --resume "$OUT"
+```
+
+训练结束后按 val 选权重、评估 test，并打印总体与按类 AP：
+
+```bash
+export CKPT=$(python -c 'import json,os; rows=[json.loads(l) for l in open(os.environ["OUT"]+"/log.txt") if l.strip()]; b=max(rows,key=lambda r:r["test_coco_eval_bbox"][0]); print("epochs=%d best_val_AP=%.2f best_epoch=%d" % (len(rows),100*b["test_coco_eval_bbox"][0],b["epoch"]+1), file=__import__("sys").stderr); print(os.environ["OUT"]+"/"+("best_stg2.pth" if b["epoch"]>=32 else "best_stg1.pth"))') && echo "$CKPT"
+export EVAL=$(mktemp -d "$OUT/test_eval_selected_XXXXXX") && ulimit -Sn 65535
+CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 train.py -c "$OUT/resolved_config.yml" -r "$CKPT" \
+  --test-only --seed 0 --use-amp --output-dir "$EVAL" --summary-dir "$EVAL/summary" \
+  -u val_dataloader.dataset.img_folder=/data2/zxy/sar/datasets/SARDet_100K/JPEGImages/test \
+     val_dataloader.dataset.ann_file=/data2/zxy/sar/datasets/SARDet_100K/Annotations/test.json \
+  2>&1 | tee "$EVAL/console.log"
+python tools/sardet100k/compare_runs.py --test-ann /data2/zxy/sar/datasets/SARDet_100K/Annotations/test.json \
+  --run E021-old="$OUT:$(basename "$EVAL")" --output "$EVAL/comparison.json"
+```
+
+E019 在 8 卡服务器上，E021 − E019 由结果记录时计算并注明跨服务器。

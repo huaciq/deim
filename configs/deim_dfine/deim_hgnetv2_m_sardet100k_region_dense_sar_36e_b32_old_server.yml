@@ -1,0 +1,17 @@
+# RegionDenseSAR v2 (E010) with old-server paths. Used to rebuild the v2 plan on the old server, which the v3
+# plan for E021-old is derived from. Only data paths, the plan directory and the output directory differ from
+# deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml; plan settings are unchanged.
+__include__: ['./deim_hgnetv2_m_sardet100k_region_dense_sar_36e_b32.yml']
+
+output_dir: /data2/zxy/sar/experiments/deim_m_sardet100k_region_dense_sar_36e_b32_old_server/seed0
+
+train_dataloader:
+  dataset:
+    img_folder: /data2/zxy/sar/datasets/SARDet_100K/JPEGImages/train
+    ann_file: /data2/zxy/sar/datasets/SARDet_100K/Annotations/train.json
+    plan_dir: /data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v2_seed0_b32
+
+val_dataloader:
+  dataset:
+    img_folder: /data2/zxy/sar/datasets/SARDet_100K/JPEGImages/val
+    ann_file: /data2/zxy/sar/datasets/SARDet_100K/Annotations/val.json
