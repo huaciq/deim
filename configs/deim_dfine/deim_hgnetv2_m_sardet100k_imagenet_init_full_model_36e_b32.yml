@@ -1,0 +1,12 @@
+# E021: the full model (E017 = E013-v2 orientation fusion + E016 RegionDenseSAR v3) with E019's ImageNet
+# initialisation: only HGNetv2-B2 starts from PPHGNetV2_B2_stage1.pth; encoder, decoder and fusion gates start
+# from scratch. Launch with INITIAL_WEIGHTS=none (no -t). Pairs with E019 (ImageNet baseline) on the same
+# eight-GPU server, GPUs 4,5, global batch 32 (16 images/rank); reuses E016/E017's v3 plan.
+__include__: ['./deim_hgnetv2_m_sardet100k_orientation_fusion_v2_region_dense_adaptive_36e_b32.yml']
+
+experiment_protocol_document: docs/sardet100k_e021_imagenet_init_full_model.md
+output_dir: /root/zxy/experiments/deim_m_sardet100k_imagenet_init_full_model_36e_b32/seed0
+
+HGNetv2:
+  pretrained: True
+  local_model_dir: /root/zxy/pretrain/hgnetv2/
