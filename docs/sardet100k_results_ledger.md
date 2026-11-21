@@ -52,7 +52,7 @@
 | E018 | E013-v2 对照：第二视图改为水平翻转，其余不变 | 0 | 35 | 65.48 | +0.19 | 93.06 | 70.39 | 60.30 | 77.35 | 70.68 | 73.54 | 74.52 | 62.09 | 71.83 | 57.84 | 47.09 | 79.53 | 19.58M | 27:33:37 | 机制对照完成：r_val 0.10、r_test 0.18（≤0.3），E013-v2 增益来自垂直视图；见 [E018](sardet100k_e018_hflip_view_control.md) |
 | E019 | ImageNet 初始化基线（只用 HGNetv2-B2 stage1 骨干，不加 -t） | 0 | 35 | 64.11 | −1.18 | 92.41 | 69.14 | 58.78 | 75.59 | 69.12 | 72.58 | 73.05 | 61.86 | 71.02 | 56.54 | 45.06 | 77.11 | 19.48M | 17:39:05 | 完成（COCO 检测初始化贡献 val 1.18 / test 1.02；APl 差最大；见 [E019](sardet100k_e019_imagenet_init.md)） |
 | E020 | E013-v2 对照：只加随机垂直翻转增强（旧服务器） | 0 | 35 | 62.00 | −3.14 | 91.76 | 67.06 | 54.08 | 75.21 | 71.85 | 70.84 | 69.33 | 62.36 | 69.82 | 49.63 | 40.96 | 79.93 | 19.48M | 16:02:33 | 完成：增强明显掉点（对 E000-old val −3.14 / test −3.75，r_val −1.60；tank、bridge、小目标损失最大）；见 [E020](sardet100k_e020_vflip_aug_control.md) |
-| E021 | 完整模型 E017 的 ImageNet 初始化版本（不加 -t；旧服务器） | 0 | | | | | | | | | | | | | | | | 19.58M | | 待启动（旧服务器 GPU 0、1，先重建 v2/v3 拼图计划；与 E019 跨服务器比较，判读标准见 [E021](sardet100k_e021_imagenet_init_full_model.md)） |
+| E021 | 完整模型 E017 的 ImageNet 初始化版本（不加 -t；旧服务器） | 0 | 35 | 68.34 | +3.19 | 94.50 | 73.48 | 64.30 | 79.79 | 72.51 | 75.94 | 74.69 | 61.99 | 71.21 | 60.46 | 54.56 | 87.11 | 19.58M | 25:00:33 | 初始化对照完成：q_val 1.20、q_test 1.14（≥0.7），方法增益不依赖 COCO 初始化（ΔAP 对 E000-old；对 E019 val +4.23 / test +3.94，跨服务器）；见 [E021](sardet100k_e021_imagenet_init_full_model.md) |
 
 六类 AP 来自独立重算（总 AP 65.29，与训练日志一致）。
 
@@ -75,6 +75,7 @@
 | E018 | 水平翻转视图对照（E013-v2 结构） | 0 | best_stg2 | 62.81 | 91.31 | 66.79 | 59.65 | 74.97 | 72.21 | 71.36 | 73.55 | 50.41 | 72.11 | 54.32 | 46.04 | 80.41 |
 | E019 | ImageNet 初始化基线 | 0 | best_stg2 | 61.37 | 89.64 | 65.58 | 58.50 | 73.75 | 67.93 | 70.22 | 71.93 | 48.62 | 71.72 | 53.61 | 42.99 | 79.38 |
 | E020 | 垂直翻转增强（旧服务器，对照 E000-old） | 0 | best_stg2 | 58.95 | 88.76 | 62.92 | 53.25 | 72.91 | 71.51 | 68.21 | 68.64 | 50.39 | 70.04 | 43.43 | 40.45 | 80.77 |
+| E021 | ImageNet 初始化完整模型（旧服务器） | 0 | best_stg2 | 65.31 | 92.17 | 69.56 | 63.73 | 76.80 | 72.25 | 73.44 | 73.77 | 48.92 | 71.10 | 57.81 | 53.09 | 87.16 |
 
 E008、E009、E010、E016 的 test 依用户明确要求评估；未用 test 选择 checkpoint 或调整配置。
 
@@ -105,7 +106,7 @@ E002 的 test 是淘汰决定之后按用户要求评估的，没有参与筛选
 | E018 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_orientation_fusion_v2_hflip_view_36e_b32.yml` | `2dd42de` | `hflipview_e018_deim_hgnetv2_m_sardet100k_orientation_fusion_v2_hflip_view_36e_b32_seed0_20261116_180625_zwdEuU`（训练与完整 test 已完成，GPU 4、5；评估目录 `test_eval_selected_PrwPou/`） |
 | E019 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_imagenet_init_36e_b32.yml` | `1ada691` | `imagenet_e019_deim_hgnetv2_m_sardet100k_imagenet_init_36e_b32_seed0_20261117_234029_hGExcb`（训练与完整 test 已完成，GPU 4、5，`INITIAL_WEIGHTS=none`；评估目录 `test_eval_selected_29fujN/`） |
 | E020 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_vflip_aug_36e_b32_old_server.yml` | `bd43d1c`（以运行目录 `git_revision.txt` 为准） | 旧服务器 GPU 0、1：`/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_vflip_aug_36e_b32_old_server_seed0_20261119_095129_mxMkKY`（训练与完整 test 已完成；评估目录 `test_eval_selected_xbw6Iq/`，E000-old test 目录 `test_eval_best_stg2_R7nI3O/`） |
-| E021 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32_old_server.yml` | 见运行目录 `git_revision.txt` | 旧服务器 GPU 0、1，`/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32_old_server_seed0_*`（待用户启动；计划 `/data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v3_seed0_b32`） |
+| E021 | `configs/deim_dfine/deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32_old_server.yml` | `ce6d8a0`（以运行目录 `git_revision.txt` 为准） | 旧服务器 GPU 0、1：`/data2/zxy/sar/experiments/deim_m_sardet100k_deim_hgnetv2_m_sardet100k_imagenet_init_full_model_36e_b32_old_server_seed0_*`（训练与完整 test 已完成，`INITIAL_WEIGHTS=none`；计划 `/data2/zxy/sar/experiments/region_banks/sardet100k_train_region_dense_sar_v3_seed0_b32`，与 8 卡服务器逐项一致；评估目录 `test_eval_selected_*/`） |
 
 ## 备注
 
